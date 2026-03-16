@@ -17,7 +17,6 @@ const navItems = [
   { path: "/create-bill", label: "Create Bill", icon: FileText },
   { path: "/orders", label: "Orders", icon: ShoppingCart },
   { path: "/rate-settings", label: "Rate Settings", icon: SettingsIcon },
-  { path: "/reports", label: "Reports", icon: BarChart3 },
   { path: "/customers", label: "Customers", icon: Users },
   { path: "/settings", label: "Settings", icon: Cog },
 ];

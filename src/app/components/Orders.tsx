@@ -5,88 +5,7 @@ import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Search, Eye, Printer } from "lucide-react";
 
-const orders = [
-  {
-    id: "#001",
-    customer: "Raj Kumar",
-    phone: "+91 98765 43210",
-    items: 3,
-    amount: "₹1,250",
-    date: "Mar 9, 2026",
-    time: "10:30 AM",
-    status: "Completed",
-  },
-  {
-    id: "#002",
-    customer: "Priya Sharma",
-    phone: "+91 98765 43211",
-    items: 2,
-    amount: "₹850",
-    date: "Mar 9, 2026",
-    time: "09:15 AM",
-    status: "Completed",
-  },
-  {
-    id: "#003",
-    customer: "Amit Patel",
-    phone: "+91 98765 43212",
-    items: 5,
-    amount: "₹2,100",
-    date: "Mar 8, 2026",
-    time: "04:20 PM",
-    status: "Completed",
-  },
-  {
-    id: "#004",
-    customer: "Sunita Singh",
-    phone: "+91 98765 43213",
-    items: 1,
-    amount: "₹650",
-    date: "Mar 8, 2026",
-    time: "02:45 PM",
-    status: "Completed",
-  },
-  {
-    id: "#005",
-    customer: "Vikram Reddy",
-    phone: "+91 98765 43214",
-    items: 4,
-    amount: "₹1,800",
-    date: "Mar 7, 2026",
-    time: "11:10 AM",
-    status: "Completed",
-  },
-  {
-    id: "#006",
-    customer: "Anjali Verma",
-    phone: "+91 98765 43215",
-    items: 2,
-    amount: "₹920",
-    date: "Mar 7, 2026",
-    time: "03:30 PM",
-    status: "Completed",
-  },
-  {
-    id: "#007",
-    customer: "Rahul Kapoor",
-    phone: "+91 98765 43216",
-    items: 3,
-    amount: "₹1,450",
-    date: "Mar 6, 2026",
-    time: "01:15 PM",
-    status: "Completed",
-  },
-  {
-    id: "#008",
-    customer: "Deepa Nair",
-    phone: "+91 98765 43217",
-    items: 1,
-    amount: "₹550",
-    date: "Mar 6, 2026",
-    time: "10:00 AM",
-    status: "Completed",
-  },
-];
+const orders: any[] = [];
 
 export function Orders() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -118,7 +37,7 @@ export function Orders() {
         <p className="text-gray-600 mt-2">View and manage all your orders</p>
       </div>
 
-      {/* Search and Filter */}
+      {/* Search */}
       <Card className="p-6 bg-white border border-gray-200 rounded-xl mb-6">
         <div className="flex items-center gap-4">
           <div className="flex-1 relative">
@@ -140,19 +59,22 @@ export function Orders() {
           <p className="text-sm text-gray-600 mb-1">Total Orders</p>
           <p className="text-2xl font-bold text-[#1F2937]">{orders.length}</p>
         </Card>
+
         <Card className="p-4 bg-white border border-gray-200 rounded-xl">
           <p className="text-sm text-gray-600 mb-1">Completed</p>
           <p className="text-2xl font-bold text-green-600">
             {orders.filter(o => o.status === "Completed").length}
           </p>
         </Card>
+
         <Card className="p-4 bg-white border border-gray-200 rounded-xl">
           <p className="text-sm text-gray-600 mb-1">Total Revenue</p>
-          <p className="text-2xl font-bold text-[#2563EB]">₹10,570</p>
+          <p className="text-2xl font-bold text-[#2563EB]">₹0</p>
         </Card>
+
         <Card className="p-4 bg-white border border-gray-200 rounded-xl">
           <p className="text-sm text-gray-600 mb-1">Today's Orders</p>
-          <p className="text-2xl font-bold text-purple-600">2</p>
+          <p className="text-2xl font-bold text-purple-600">0</p>
         </Card>
       </div>
 
@@ -172,6 +94,7 @@ export function Orders() {
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Actions</th>
               </tr>
             </thead>
+
             <tbody className="divide-y divide-gray-200">
               {filteredOrders.map((order) => (
                 <tr key={order.id} className="hover:bg-gray-50">
@@ -194,6 +117,7 @@ export function Orders() {
                       >
                         <Eye className="w-4 h-4" />
                       </Button>
+
                       <Button
                         size="sm"
                         variant="outline"
