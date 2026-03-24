@@ -14,7 +14,6 @@ The project is built using:
 
 # App Preview
 
-*(Add screenshots here later)*
 
 Example:
 
