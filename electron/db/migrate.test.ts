@@ -175,7 +175,7 @@ describe("the real, shipped migration list (v1 settings + v2 rates + v3 customer
 
   it("records all three migration versions", () => {
     const db = createConnection(":memory:");
-    runMigrations(db);
+    runMigrations(db, realMigrations.slice(0, 3));
     const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
       version: number;
     }[];
@@ -199,7 +199,7 @@ describe("the real, shipped migration list (v1 settings + v2 rates + v3 customer
       "still here"
     );
 
-    runMigrations(db); // full, real list — should apply only the newly-pending migration 3
+    runMigrations(db, realMigrations.slice(0, 3)); // v1+v2+v3 list — should apply only the newly-pending migration 3
 
     const settingRow = db.prepare("SELECT value FROM settings WHERE key = 'phase3Test'").get() as
       | { value: string }
@@ -224,6 +224,85 @@ describe("the real, shipped migration list (v1 settings + v2 rates + v3 customer
     const rates = db.prepare("SELECT * FROM rates").all();
     expect(customers).toHaveLength(0);
     expect(rates).toHaveLength(8);
+    db.close();
+  });
+});
+
+describe("the real, shipped migration list (v1-v4, orders)", () => {
+  it("creates the orders and order_items tables from a fresh database", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('orders', 'order_items')")
+      .all() as { name: string }[];
+    expect(tables.map((t) => t.name).sort()).toEqual(["order_items", "orders"]);
+    db.close();
+  });
+
+  it("records all four migration versions", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((r) => r.version)).toEqual([1, 2, 3, 4]);
+    db.close();
+  });
+
+  it("creates empty orders/order_items tables on a fresh database (no invented seed data)", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    expect(db.prepare("SELECT * FROM orders").all()).toHaveLength(0);
+    expect(db.prepare("SELECT * FROM order_items").all()).toHaveLength(0);
+    db.close();
+  });
+
+  it("upgrades an existing v1+v2+v3 database (simulating a real prior install) by applying only migration 4", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 3));
+
+    const before = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'orders'")
+      .all();
+    expect(before).toHaveLength(0);
+
+    runMigrations(db); // full, real list — should apply only the newly-pending migration 4
+
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((r) => r.version)).toEqual([1, 2, 3, 4]);
+    db.close();
+  });
+
+  it("does not disturb settings, rates, or customers data when adding migration 4", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 3));
+    db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))").run(
+      "phase3Test",
+      "still here"
+    );
+    db.prepare(
+      "INSERT INTO customers (name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("Ramesh", "123", null, "Road");
+
+    runMigrations(db);
+
+    const settingRow = db.prepare("SELECT value FROM settings WHERE key = 'phase3Test'").get() as
+      | { value: string }
+      | undefined;
+    expect(settingRow?.value).toBe("still here");
+    expect(db.prepare("SELECT * FROM rates").all()).toHaveLength(8);
+    expect(db.prepare("SELECT * FROM customers").all()).toHaveLength(1);
+    db.close();
+  });
+
+  it("running the full list twice is safe and does not duplicate anything", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    runMigrations(db);
+    expect(db.prepare("SELECT * FROM orders").all()).toHaveLength(0);
+    expect(db.prepare("SELECT * FROM rates").all()).toHaveLength(8);
     db.close();
   });
 });

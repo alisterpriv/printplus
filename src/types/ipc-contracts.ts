@@ -46,10 +46,66 @@ export interface CustomersApi {
   update(id: number, input: CustomerInput): Promise<void>;
 }
 
+export type OrderStatus = "Pending" | "Processing" | "Completed";
+
+export interface OrderItem {
+  id: number;
+  printType: string;
+  width: number;
+  height: number;
+  unit: string;
+  areaSquareMeters: number;
+  rate: number;
+  quantity: number;
+  total: number;
+}
+
+export interface Order {
+  id: number;
+  customerId: number;
+  customerName: string;
+  customerPhone: string | null;
+  customerAddress: string | null;
+  status: OrderStatus;
+  items: OrderItem[];
+  subtotal: number;
+  discountPercent: number;
+  discountAmount: number;
+  gstPercent: number;
+  gstAmount: number;
+  grandTotal: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrderItemInput {
+  printType: string;
+  width: number;
+  height: number;
+  unit: string;
+  rate: number;
+  quantity: number;
+}
+
+export interface OrderInput {
+  customerId: number;
+  items: OrderItemInput[];
+  discountPercent: number;
+  gstPercent: number;
+}
+
+export interface OrdersApi {
+  list(): Promise<Order[]>;
+  get(id: number): Promise<Order>;
+  create(input: OrderInput): Promise<Order>;
+  updateStatus(id: number, status: OrderStatus): Promise<void>;
+}
+
 export interface PrintPlusApi {
   settings: SettingsApi;
   rates: RatesApi;
   customers: CustomersApi;
+  orders: OrdersApi;
 }
 
 declare global {

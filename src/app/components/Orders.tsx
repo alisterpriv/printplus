@@ -1,20 +1,51 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Search, Eye, Printer } from "lucide-react";
+import { toast } from "sonner";
+import type { Order, OrderStatus } from "../../types/ipc-contracts";
 
-const orders: any[] = [];
+const ORDER_STATUSES: OrderStatus[] = ["Pending", "Processing", "Completed"];
 
 export function Orders() {
+  const navigate = useNavigate();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
+  useEffect(() => {
+    window.api.orders
+      .list()
+      .then(setOrders)
+      .catch(() => toast.error("Failed to load orders"))
+      .finally(() => setIsLoading(false));
+  }, []);
+
   const filteredOrders = orders.filter(order =>
-    order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    order.customer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    order.phone.includes(searchQuery)
+    String(order.id).includes(searchQuery.toLowerCase()) ||
+    order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    order.customerPhone?.includes(searchQuery)
   );
+
+  const handleStatusChange = async (order: Order, status: OrderStatus) => {
+    if (status === order.status) return;
+    try {
+      await window.api.orders.updateStatus(order.id, status);
+      setOrders(orders.map(o => (o.id === order.id ? { ...o, status } : o)));
+      toast.success("Order status updated");
+    } catch {
+      toast.error("Failed to update order status");
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -96,45 +127,72 @@ export function Orders() {
             </thead>
 
             <tbody className="divide-y divide-gray-200">
-              {filteredOrders.map((order) => (
-                <tr key={order.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-[#2563EB]">{order.id}</td>
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{order.customer}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{order.phone}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{order.items}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">{order.amount}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    <div>{order.date}</div>
-                    <div className="text-xs text-gray-500">{order.time}</div>
-                  </td>
-                  <td className="px-6 py-4">{getStatusBadge(order.status)}</td>
-                  <td className="px-6 py-4">
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="border-gray-300 hover:bg-gray-50"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </Button>
+              {filteredOrders.map((order) => {
+                const created = new Date((order.createdAt.replace(" ", "T")) + "Z");
+                return (
+                  <tr key={order.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm font-medium text-[#2563EB]">#{order.id}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{order.customerName}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{order.customerPhone || "—"}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900">{order.items.length}</td>
+                    <td className="px-6 py-4 text-sm font-semibold text-gray-900">₹{order.grandTotal.toFixed(2)}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      <div>{Number.isNaN(created.getTime()) ? order.createdAt : created.toLocaleDateString()}</div>
+                      <div className="text-xs text-gray-500">
+                        {Number.isNaN(created.getTime()) ? "" : created.toLocaleTimeString()}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button type="button" className="cursor-pointer">
+                            {getStatusBadge(order.status)}
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start">
+                          {ORDER_STATUSES.map((status) => (
+                            <DropdownMenuItem key={status} onClick={() => handleStatusChange(order, status)}>
+                              {status}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-gray-300 hover:bg-gray-50"
+                          onClick={() => navigate(`/invoice/${order.id}`)}
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Button>
 
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="border-gray-300 hover:bg-gray-50"
-                      >
-                        <Printer className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-gray-300 hover:bg-gray-50"
+                          onClick={() => navigate(`/invoice/${order.id}`)}
+                        >
+                          <Printer className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 
-          {filteredOrders.length === 0 && (
+          {!isLoading && filteredOrders.length === 0 && (
             <div className="text-center py-12">
               <p className="text-gray-500">No orders found</p>
+            </div>
+          )}
+          {isLoading && (
+            <div className="text-center py-12">
+              <p className="text-gray-500">Loading orders...</p>
             </div>
           )}
         </div>

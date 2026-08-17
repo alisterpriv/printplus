@@ -84,4 +84,47 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: "create_orders",
+    up: (db) => {
+      // order_items has no foreign key to rates: it stores the price
+      // actually charged at order time (rate_paise), not a live reference
+      // that would silently change if a rate is edited later. This also
+      // lets "Custom" print-type items persist, since Custom has no row
+      // in rates at all.
+      db.exec(`
+        CREATE TABLE orders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          customer_id INTEGER NOT NULL REFERENCES customers(id),
+          customer_name TEXT NOT NULL,
+          customer_phone TEXT,
+          customer_address TEXT,
+          status TEXT NOT NULL,
+          subtotal_paise INTEGER NOT NULL,
+          discount_percent REAL NOT NULL,
+          discount_paise INTEGER NOT NULL,
+          gst_percent REAL NOT NULL,
+          gst_paise INTEGER NOT NULL,
+          grand_total_paise INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      db.exec(`
+        CREATE TABLE order_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          order_id INTEGER NOT NULL REFERENCES orders(id),
+          print_type TEXT NOT NULL,
+          width REAL NOT NULL,
+          height REAL NOT NULL,
+          unit TEXT NOT NULL,
+          area_sq_meters REAL NOT NULL,
+          rate_paise INTEGER NOT NULL,
+          quantity INTEGER NOT NULL,
+          total_paise INTEGER NOT NULL
+        )
+      `);
+    },
+  },
 ];

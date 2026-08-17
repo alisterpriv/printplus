@@ -48,6 +48,15 @@ export function listCustomers(db: DatabaseSync): Customer[] {
   return rows.map(toCustomer);
 }
 
+/** Used by ordersService to resolve the real customer behind a customer_id before snapshotting it onto an order. */
+export function getCustomerById(db: DatabaseSync, id: number): Customer {
+  const row = db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as unknown as CustomerRow | undefined;
+  if (!row) {
+    throw new CustomerNotFoundError(`No customer found with id ${id}`);
+  }
+  return toCustomer(row);
+}
+
 export function createCustomer(db: DatabaseSync, input: CustomerInput): Customer {
   const result = db
     .prepare(

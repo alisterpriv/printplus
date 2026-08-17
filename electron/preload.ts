@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { SettingsApi, RatesApi, CustomersApi } from "../src/types/ipc-contracts";
+import type { SettingsApi, RatesApi, CustomersApi, OrdersApi } from "../src/types/ipc-contracts";
 
 /**
  * The only bridge between the renderer and the main process. Exposes
@@ -23,8 +23,16 @@ const customersApi: CustomersApi = {
   update: (id, input) => ipcRenderer.invoke("customers:update", { id, ...input }),
 };
 
+const ordersApi: OrdersApi = {
+  list: () => ipcRenderer.invoke("orders:list"),
+  get: (id) => ipcRenderer.invoke("orders:get", id),
+  create: (input) => ipcRenderer.invoke("orders:create", input),
+  updateStatus: (id, status) => ipcRenderer.invoke("orders:updateStatus", { id, status }),
+};
+
 contextBridge.exposeInMainWorld("api", {
   settings: settingsApi,
   rates: ratesApi,
   customers: customersApi,
+  orders: ordersApi,
 });

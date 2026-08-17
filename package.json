@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:electron": "tsc -p tsconfig.electron.json && node -e \"require('fs').copyFileSync('electron/package.json','dist-electron/electron/package.json')\"",
+    "build:electron": "tsc -p tsconfig.electron.json && node -e \"require('fs').copyFileSync('electron/package.json','dist-electron/package.json')\"",
     "preview": "vite preview",
     "preelectron": "npm run build:electron",
     "electron": "electron .",

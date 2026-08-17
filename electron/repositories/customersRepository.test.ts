@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { createConnection } from "../db/connection";
 import { runMigrations } from "../db/migrate";
-import { listCustomers, createCustomer, updateCustomer, CustomerNotFoundError } from "./customersRepository";
+import {
+  listCustomers,
+  createCustomer,
+  updateCustomer,
+  getCustomerById,
+  CustomerNotFoundError,
+} from "./customersRepository";
 
 describe("customersRepository", () => {
   let db: DatabaseSync;
@@ -82,5 +88,15 @@ describe("customersRepository", () => {
     expect(() =>
       updateCustomer(db, 999999, { name: "Nobody", phone: null, email: null, address: null })
     ).toThrow(CustomerNotFoundError);
+  });
+
+  it("getCustomerById returns the matching customer", () => {
+    const created = createCustomer(db, { name: "Ramesh", phone: "123", email: null, address: "Road" });
+    const found = getCustomerById(db, created.id);
+    expect(found).toEqual(created);
+  });
+
+  it("getCustomerById throws CustomerNotFoundError for a nonexistent id", () => {
+    expect(() => getCustomerById(db, 999999)).toThrow(CustomerNotFoundError);
   });
 });

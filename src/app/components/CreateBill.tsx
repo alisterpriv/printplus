@@ -5,7 +5,14 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Trash2, Plus, Printer, Save, FileDown } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "./ui/dialog";
+import { Trash2, Plus, Printer, Save, FileDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import {
   calculateAreaInSquareMeters,
@@ -13,18 +20,21 @@ import {
   calculateBillSummary,
   type LengthUnit,
 } from "../../domain/pricing";
-import type { Rate } from "../../types/ipc-contracts";
+import type { Rate, Customer } from "../../types/ipc-contracts";
 
 interface BillItem {
   id: string;
   type: string;
   width: number;
   height: number;
+  unit: LengthUnit;
   area: number;
   rate: number;
   quantity: number;
   total: number;
 }
+
+const EMPTY_NEW_CUSTOMER = { name: "", phone: "", email: "", address: "" };
 
 // "Custom" is a renderer-only escape hatch for one-off pricing — it is
 // never persisted as a rate and never sent through any IPC call. Real
@@ -42,10 +52,21 @@ const units: { name: LengthUnit }[] = [
 export function CreateBill() {
   const navigate = useNavigate();
   
-  // Customer Info
-  const [customerName, setCustomerName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
+  // Customer selection (Phase 6) — Create Bill now links to a real, saved
+  // customer instead of free-typing name/phone/address each time. The
+  // phone/address fields become a read-only display of the selected
+  // customer, since the order's historical snapshot is resolved
+  // server-side from customerId, not from whatever text might be in
+  // these boxes — editing them here would silently have no effect.
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(true);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+  const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
+  const [newCustomer, setNewCustomer] = useState(EMPTY_NEW_CUSTOMER);
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+
+  const selectedCustomer = customers.find((c) => String(c.id) === selectedCustomerId) ?? null;
 
   // Print Job Details
   const [printType, setPrintType] = useState("");
@@ -73,6 +94,39 @@ export function CreateBill() {
       .catch(() => toast.error("Failed to load print rates"))
       .finally(() => setRatesLoading(false));
   }, []);
+
+  const loadCustomers = () => {
+    setCustomersLoading(true);
+    return window.api.customers
+      .list()
+      .then(setCustomers)
+      .catch(() => toast.error("Failed to load customers"))
+      .finally(() => setCustomersLoading(false));
+  };
+
+  useEffect(() => {
+    loadCustomers();
+  }, []);
+
+  const handleAddCustomer = async () => {
+    if (!newCustomer.name.trim()) {
+      toast.error("Please enter a customer name");
+      return;
+    }
+    setIsSavingCustomer(true);
+    try {
+      const created = await window.api.customers.create(newCustomer);
+      await loadCustomers();
+      setSelectedCustomerId(String(created.id));
+      setIsAddCustomerOpen(false);
+      setNewCustomer(EMPTY_NEW_CUSTOMER);
+      toast.success("Customer added successfully");
+    } catch {
+      toast.error("Failed to add customer");
+    } finally {
+      setIsSavingCustomer(false);
+    }
+  };
 
   // Real print types come from the database; "Custom" is always appended
   // as a client-only option, matching the original hardcoded list's order.
@@ -112,6 +166,7 @@ export function CreateBill() {
       type: printType,
       width: parseFloat(width),
       height: parseFloat(height),
+      unit,
       area: area,
       rate: parseFloat(rate),
       quantity: parseInt(quantity),
@@ -143,33 +198,41 @@ export function CreateBill() {
     parseFloat(gst || "0")
   );
 
-  // Print Invoice
-  const handlePrintInvoice = () => {
+  // Print Invoice — creates the persistent Order (Phase 6). Replaces the
+  // old localStorage bill hand-off: the order and its items are now
+  // written to SQLite in one transaction, and the invoice page reads the
+  // real, persisted order back by id.
+  const handlePrintInvoice = async () => {
     if (items.length === 0) {
       toast.error("Please add at least one item");
       return;
     }
-    if (!customerName) {
-      toast.error("Please enter customer name");
+    if (!selectedCustomer) {
+      toast.error("Please select a customer");
       return;
     }
-    
-    // Save bill data to localStorage for the invoice page
-    const billData = {
-      id: Date.now().toString(),
-      customerName,
-      phone,
-      address,
-      items,
-      subtotal,
-      discount: discountAmount,
-      gst: gstAmount,
-      grandTotal,
-      date: new Date().toLocaleDateString(),
-    };
-    
-    localStorage.setItem(`bill-${billData.id}`, JSON.stringify(billData));
-    navigate(`/invoice/${billData.id}`);
+
+    setIsSubmittingOrder(true);
+    try {
+      const order = await window.api.orders.create({
+        customerId: selectedCustomer.id,
+        items: items.map((item) => ({
+          printType: item.type,
+          width: item.width,
+          height: item.height,
+          unit: item.unit,
+          rate: item.rate,
+          quantity: item.quantity,
+        })),
+        discountPercent: parseFloat(discount || "0"),
+        gstPercent: parseFloat(gst || "0"),
+      });
+      navigate(`/invoice/${order.id}`);
+    } catch {
+      toast.error("Failed to create order");
+    } finally {
+      setIsSubmittingOrder(false);
+    }
   };
 
   return (
@@ -187,33 +250,54 @@ export function CreateBill() {
           <Card className="p-6 bg-white border border-gray-200 rounded-xl">
             <h2 className="text-xl font-bold text-[#1F2937] mb-4">Customer Information</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="customerName">Customer Name *</Label>
-                <Input
-                  id="customerName"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Enter customer name"
-                  className="mt-1"
-                />
+              <div className="md:col-span-2">
+                <Label htmlFor="customer">Customer *</Label>
+                <div className="flex gap-2 mt-1">
+                  <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId} disabled={customersLoading}>
+                    <SelectTrigger id="customer" className="flex-1">
+                      <SelectValue placeholder={customersLoading ? "Loading customers..." : "Select a customer"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {customers.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}{c.phone ? ` — ${c.phone}` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-gray-300 shrink-0"
+                    onClick={() => setIsAddCustomerOpen(true)}
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Add New Customer
+                  </Button>
+                </div>
+                {!customersLoading && customers.length === 0 && (
+                  <p className="text-sm text-amber-600 mt-1">
+                    No customers yet — add one to get started.
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="phone">Phone Number</Label>
                 <Input
                   id="phone"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="Enter phone number"
+                  value={selectedCustomer?.phone ?? ""}
+                  disabled
+                  placeholder="Select a customer to see phone"
                   className="mt-1"
                 />
               </div>
-              <div className="md:col-span-2">
+              <div>
                 <Label htmlFor="address">Address</Label>
                 <Input
                   id="address"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Enter customer address"
+                  value={selectedCustomer?.address ?? ""}
+                  disabled
+                  placeholder="Select a customer to see address"
                   className="mt-1"
                 />
               </div>
@@ -435,12 +519,13 @@ export function CreateBill() {
             </div>
 
             <div className="space-y-2">
-              <Button 
+              <Button
                 onClick={handlePrintInvoice}
+                disabled={isSubmittingOrder}
                 className="w-full bg-[#2563EB] hover:bg-blue-700"
               >
                 <Printer className="w-4 h-4 mr-2" />
-                Print Invoice
+                {isSubmittingOrder ? "Creating Order..." : "Print Invoice"}
               </Button>
               <Button 
                 variant="outline" 
@@ -462,6 +547,77 @@ export function CreateBill() {
           </Card>
         </div>
       </div>
+
+      {/* Add New Customer Dialog */}
+      <Dialog open={isAddCustomerOpen} onOpenChange={setIsAddCustomerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Customer</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="new-customer-name">Name *</Label>
+              <Input
+                id="new-customer-name"
+                value={newCustomer.name}
+                onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                placeholder="Enter customer name"
+                className="mt-1"
+                autoFocus
+              />
+            </div>
+            <div>
+              <Label htmlFor="new-customer-phone">Phone</Label>
+              <Input
+                id="new-customer-phone"
+                value={newCustomer.phone}
+                onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                placeholder="Enter phone number"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="new-customer-email">Email</Label>
+              <Input
+                id="new-customer-email"
+                value={newCustomer.email}
+                onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
+                placeholder="Enter email address"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="new-customer-address">Address</Label>
+              <Input
+                id="new-customer-address"
+                value={newCustomer.address}
+                onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })}
+                placeholder="Enter address"
+                className="mt-1"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="border-gray-300"
+              onClick={() => setIsAddCustomerOpen(false)}
+              disabled={isSavingCustomer}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-[#2563EB] hover:bg-blue-700"
+              onClick={handleAddCustomer}
+              disabled={isSavingCustomer}
+            >
+              {isSavingCustomer ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

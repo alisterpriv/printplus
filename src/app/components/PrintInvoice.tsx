@@ -2,51 +2,60 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router";
 import { Button } from "./ui/button";
 import { Printer, Download, ArrowLeft } from "lucide-react";
+import type { Order } from "../../types/ipc-contracts";
 
-interface BillData {
-  id: string;
-  customerName: string;
-  phone: string;
-  address: string;
-  items: Array<{
-    id: string;
-    type: string;
-    width: number;
-    height: number;
-    area: number;
-    rate: number;
-    quantity: number;
-    total: number;
-  }>;
-  subtotal: number;
-  discount: number;
-  gst: number;
-  grandTotal: number;
-  date: string;
+/**
+ * Renders the historical Order exactly as persisted (customer snapshot,
+ * item rates, discount/GST) — never re-reads current Customer or Rate
+ * Settings values, since those may have changed since the order was
+ * created. See ordersService.createOrder for where the snapshot is taken.
+ */
+function formatOrderDate(createdAt: string): string {
+  // SQLite's datetime('now') returns "YYYY-MM-DD HH:MM:SS" in UTC with no
+  // timezone marker — reformat it so Date can parse it as UTC correctly
+  // instead of ambiguously as local time.
+  const isoLike = createdAt.replace(" ", "T") + "Z";
+  const parsed = new Date(isoLike);
+  return Number.isNaN(parsed.getTime()) ? createdAt : parsed.toLocaleDateString();
 }
 
 export function PrintInvoice() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [billData, setBillData] = useState<BillData | null>(null);
+  const [order, setOrder] = useState<Order | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    if (id) {
-      const data = localStorage.getItem(`bill-${id}`);
-      if (data) {
-        setBillData(JSON.parse(data));
-      }
+    const orderId = Number(id);
+    if (!id || !Number.isInteger(orderId) || orderId <= 0) {
+      setIsLoading(false);
+      setNotFound(true);
+      return;
     }
+    window.api.orders
+      .get(orderId)
+      .then(setOrder)
+      .catch(() => setNotFound(true))
+      .finally(() => setIsLoading(false));
   }, [id]);
 
   const handlePrint = () => {
     window.print();
   };
 
-  if (!billData) {
+  if (isLoading) {
     return (
       <div className="p-8 text-center">
         <p className="text-gray-600">Loading invoice...</p>
+      </div>
+    );
+  }
+
+  if (notFound || !order) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-gray-600">Invoice not found.</p>
       </div>
     );
   }
@@ -99,8 +108,8 @@ export function PrintInvoice() {
               </div>
               <div className="text-right">
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">INVOICE</h2>
-                <p className="text-sm text-gray-600">Invoice #: {billData.id}</p>
-                <p className="text-sm text-gray-600">Date: {billData.date}</p>
+                <p className="text-sm text-gray-600">Order #: {order.id}</p>
+                <p className="text-sm text-gray-600">Date: {formatOrderDate(order.createdAt)}</p>
               </div>
             </div>
           </div>
@@ -108,9 +117,9 @@ export function PrintInvoice() {
           {/* Customer Details */}
           <div className="mb-8">
             <h3 className="text-sm font-semibold text-gray-700 mb-2">Bill To:</h3>
-            <p className="font-bold text-gray-900 text-lg">{billData.customerName}</p>
-            {billData.phone && <p className="text-sm text-gray-600">Phone: {billData.phone}</p>}
-            {billData.address && <p className="text-sm text-gray-600">{billData.address}</p>}
+            <p className="font-bold text-gray-900 text-lg">{order.customerName}</p>
+            {order.customerPhone && <p className="text-sm text-gray-600">Phone: {order.customerPhone}</p>}
+            {order.customerAddress && <p className="text-sm text-gray-600">{order.customerAddress}</p>}
           </div>
 
           {/* Items Table */}
@@ -139,16 +148,16 @@ export function PrintInvoice() {
                 </tr>
               </thead>
               <tbody>
-                {billData.items.map((item) => (
+                {order.items.map((item) => (
                   <tr key={item.id}>
                     <td className="border border-gray-300 px-4 py-3 text-sm text-gray-900">
-                      {item.type}
+                      {item.printType}
                     </td>
                     <td className="border border-gray-300 px-4 py-3 text-sm text-gray-900">
                       {item.width.toFixed(2)} × {item.height.toFixed(2)}
                     </td>
                     <td className="border border-gray-300 px-4 py-3 text-sm text-gray-900 text-right">
-                      {item.area.toFixed(4)}
+                      {item.areaSquareMeters.toFixed(4)}
                     </td>
                     <td className="border border-gray-300 px-4 py-3 text-sm text-gray-900 text-right">
                       ₹{item.rate}
@@ -170,21 +179,21 @@ export function PrintInvoice() {
             <div className="w-80">
               <div className="flex justify-between py-2 border-b border-gray-200">
                 <span className="text-sm text-gray-600">Subtotal:</span>
-                <span className="text-sm font-semibold text-gray-900">₹{billData.subtotal.toFixed(2)}</span>
+                <span className="text-sm font-semibold text-gray-900">₹{order.subtotal.toFixed(2)}</span>
               </div>
-              {billData.discount > 0 && (
+              {order.discountAmount > 0 && (
                 <div className="flex justify-between py-2 border-b border-gray-200">
                   <span className="text-sm text-gray-600">Discount:</span>
-                  <span className="text-sm font-semibold text-gray-900">- ₹{billData.discount.toFixed(2)}</span>
+                  <span className="text-sm font-semibold text-gray-900">- ₹{order.discountAmount.toFixed(2)}</span>
                 </div>
               )}
               <div className="flex justify-between py-2 border-b border-gray-200">
                 <span className="text-sm text-gray-600">GST:</span>
-                <span className="text-sm font-semibold text-gray-900">+ ₹{billData.gst.toFixed(2)}</span>
+                <span className="text-sm font-semibold text-gray-900">+ ₹{order.gstAmount.toFixed(2)}</span>
               </div>
               <div className="flex justify-between py-3 border-t-2 border-gray-300 mt-2">
                 <span className="font-bold text-gray-900">Grand Total:</span>
-                <span className="text-xl font-bold text-[#2563EB]">₹{billData.grandTotal.toFixed(2)}</span>
+                <span className="text-xl font-bold text-[#2563EB]">₹{order.grandTotal.toFixed(2)}</span>
               </div>
             </div>
           </div>
