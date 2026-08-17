@@ -10,8 +10,22 @@ export interface SettingsApi {
   set(key: string, value: string): Promise<void>;
 }
 
+export interface Rate {
+  id: number;
+  printType: string;
+  rate: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RatesApi {
+  list(): Promise<Rate[]>;
+  update(id: number, rate: number): Promise<void>;
+}
+
 export interface PrintPlusApi {
   settings: SettingsApi;
+  rates: RatesApi;
 }
 
 declare global {

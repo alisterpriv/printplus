@@ -6,7 +6,7 @@ import { migrations as realMigrations, type Migration } from "./migrations";
 describe("runMigrations", () => {
   it("applies migration 1 to a fresh database and creates the settings table", () => {
     const db = createConnection(":memory:");
-    runMigrations(db);
+    runMigrations(db, [realMigrations[0]]);
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'").all();
     expect(tables).toHaveLength(1);
     db.close();
@@ -14,7 +14,7 @@ describe("runMigrations", () => {
 
   it("records the applied migration version", () => {
     const db = createConnection(":memory:");
-    runMigrations(db);
+    runMigrations(db, [realMigrations[0]]);
     const rows = db.prepare("SELECT version FROM schema_migrations").all() as { version: number }[];
     expect(rows.map((r) => r.version)).toEqual([1]);
     db.close();
@@ -89,6 +89,75 @@ describe("runMigrations", () => {
       version: number;
     }[];
     expect(rows.map((r) => r.version)).toEqual([1, 2]);
+    db.close();
+  });
+});
+
+describe("the real, shipped migration list (v1 settings + v2 rates)", () => {
+  it("creates both settings and rates tables from a fresh database", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('settings', 'rates')")
+      .all() as { name: string }[];
+    expect(tables.map((t) => t.name).sort()).toEqual(["rates", "settings"]);
+    db.close();
+  });
+
+  it("records both migration versions", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((r) => r.version)).toEqual([1, 2]);
+    db.close();
+  });
+
+  it("seeds exactly 8 rates, in the original hardcoded order, on a fresh database", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const rows = db.prepare("SELECT print_type FROM rates ORDER BY id ASC").all() as { print_type: string }[];
+    expect(rows.map((r) => r.print_type)).toEqual([
+      "Flex",
+      "Banner",
+      "Vinyl",
+      "Sunboard",
+      "Canvas",
+      "Sticker",
+      "Backlit",
+      "One Way Vision",
+    ]);
+    db.close();
+  });
+
+  it("upgrades an existing v1-only database (simulating a real prior install) by applying only migration 2", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, [realMigrations[0]]);
+
+    const ratesTableBefore = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rates'")
+      .all();
+    expect(ratesTableBefore).toHaveLength(0);
+
+    runMigrations(db); // full, real list — should apply only the newly-pending migration 2
+
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((r) => r.version)).toEqual([1, 2]);
+
+    const rates = db.prepare("SELECT * FROM rates").all();
+    expect(rates).toHaveLength(8);
+    db.close();
+  });
+
+  it("running the full list twice is safe and does not duplicate seed data", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    runMigrations(db);
+    const rates = db.prepare("SELECT * FROM rates").all();
+    expect(rates).toHaveLength(8);
     db.close();
   });
 });

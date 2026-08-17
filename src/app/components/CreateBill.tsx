@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
@@ -13,6 +13,7 @@ import {
   calculateBillSummary,
   type LengthUnit,
 } from "../../domain/pricing";
+import type { Rate } from "../../types/ipc-contracts";
 
 interface BillItem {
   id: string;
@@ -25,14 +26,11 @@ interface BillItem {
   total: number;
 }
 
-const printTypes = [
-  { name: "Flex", rate: 10 },
-  { name: "Banner", rate: 12 },
-  { name: "Vinyl", rate: 15 },
-  { name: "Sunboard", rate: 18 },
-  { name: "Canvas", rate: 20 },
-  { name: "Custom", rate: 0 },
-];
+// "Custom" is a renderer-only escape hatch for one-off pricing — it is
+// never persisted as a rate and never sent through any IPC call. Real
+// print types come from the database (window.api.rates.list()) so this
+// component no longer maintains its own hardcoded copy of them.
+const CUSTOM_PRINT_TYPE = { name: "Custom", rate: 0 };
 
 const units: { name: LengthUnit }[] = [
   { name: "Meter" },
@@ -63,6 +61,25 @@ export function CreateBill() {
   // Summary
   const [discount, setDiscount] = useState("0");
   const [gst, setGst] = useState("18");
+
+  // Rates, loaded from the database (Phase 4)
+  const [rates, setRates] = useState<Rate[]>([]);
+  const [ratesLoading, setRatesLoading] = useState(true);
+
+  useEffect(() => {
+    window.api.rates
+      .list()
+      .then(setRates)
+      .catch(() => toast.error("Failed to load print rates"))
+      .finally(() => setRatesLoading(false));
+  }, []);
+
+  // Real print types come from the database; "Custom" is always appended
+  // as a client-only option, matching the original hardcoded list's order.
+  const printTypes = [
+    ...rates.map((r) => ({ name: r.printType, rate: r.rate })),
+    CUSTOM_PRINT_TYPE,
+  ];
 
   // Calculate area in square meters
   const calculateArea = () => {
@@ -210,9 +227,9 @@ export function CreateBill() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div className="md:col-span-2">
                 <Label htmlFor="printType">Print Type *</Label>
-                <Select value={printType} onValueChange={handlePrintTypeChange}>
+                <Select value={printType} onValueChange={handlePrintTypeChange} disabled={ratesLoading}>
                   <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select print type" />
+                    <SelectValue placeholder={ratesLoading ? "Loading print types..." : "Select print type"} />
                   </SelectTrigger>
                   <SelectContent>
                     {printTypes.map((type) => (
@@ -222,6 +239,11 @@ export function CreateBill() {
                     ))}
                   </SelectContent>
                 </Select>
+                {!ratesLoading && rates.length === 0 && (
+                  <p className="text-sm text-amber-600 mt-1">
+                    No print types configured — add rates in Rate Settings first.
+                  </p>
+                )}
               </div>
 
               <div className="md:col-span-2">

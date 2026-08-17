@@ -1,33 +1,26 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Edit, Save, X } from "lucide-react";
 import { toast } from "sonner";
-
-interface PrintRate {
-  id: string;
-  type: string;
-  rate: number;
-}
-
-const initialRates: PrintRate[] = [
-  { id: "1", type: "Flex", rate: 10 },
-  { id: "2", type: "Banner", rate: 12 },
-  { id: "3", type: "Vinyl", rate: 15 },
-  { id: "4", type: "Sunboard", rate: 18 },
-  { id: "5", type: "Canvas", rate: 20 },
-  { id: "6", type: "Sticker", rate: 8 },
-  { id: "7", type: "Backlit", rate: 25 },
-  { id: "8", type: "One Way Vision", rate: 22 },
-];
+import type { Rate } from "../../types/ipc-contracts";
 
 export function RateSettings() {
-  const [rates, setRates] = useState<PrintRate[]>(initialRates);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [rates, setRates] = useState<Rate[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  const startEdit = (rate: PrintRate) => {
+  useEffect(() => {
+    window.api.rates
+      .list()
+      .then(setRates)
+      .catch(() => toast.error("Failed to load rates"))
+      .finally(() => setIsLoading(false));
+  }, []);
+
+  const startEdit = (rate: Rate) => {
     setEditingId(rate.id);
     setEditValue(rate.rate.toString());
   };
@@ -37,20 +30,24 @@ export function RateSettings() {
     setEditValue("");
   };
 
-  const saveEdit = (id: string) => {
+  const saveEdit = async (id: number) => {
     const newRate = parseFloat(editValue);
     if (isNaN(newRate) || newRate <= 0) {
       toast.error("Please enter a valid rate");
       return;
     }
 
-    setRates(rates.map(rate => 
-      rate.id === id ? { ...rate, rate: newRate } : rate
-    ));
-    
-    setEditingId(null);
-    setEditValue("");
-    toast.success("Rate updated successfully");
+    try {
+      await window.api.rates.update(id, newRate);
+      setRates(rates.map(rate =>
+        rate.id === id ? { ...rate, rate: newRate } : rate
+      ));
+      setEditingId(null);
+      setEditValue("");
+      toast.success("Rate updated successfully");
+    } catch {
+      toast.error("Failed to update rate");
+    }
   };
 
   return (
@@ -62,6 +59,11 @@ export function RateSettings() {
       </div>
 
       <div className="max-w-4xl">
+        {isLoading ? (
+          <Card className="p-12 bg-white border border-gray-200 rounded-xl text-center">
+            <p className="text-gray-500">Loading rates...</p>
+          </Card>
+        ) : (
         <Card className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -76,7 +78,7 @@ export function RateSettings() {
                 {rates.map((rate) => (
                   <tr key={rate.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <span className="text-sm font-medium text-gray-900">{rate.type}</span>
+                      <span className="text-sm font-medium text-gray-900">{rate.printType}</span>
                     </td>
                     <td className="px-6 py-4">
                       {editingId === rate.id ? (
@@ -131,6 +133,7 @@ export function RateSettings() {
             </table>
           </div>
         </Card>
+        )}
 
         {/* Info Card */}
         <Card className="mt-6 p-6 bg-blue-50 border border-blue-200 rounded-xl">
