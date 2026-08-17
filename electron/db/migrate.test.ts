@@ -106,7 +106,7 @@ describe("the real, shipped migration list (v1 settings + v2 rates)", () => {
 
   it("records both migration versions", () => {
     const db = createConnection(":memory:");
-    runMigrations(db);
+    runMigrations(db, realMigrations.slice(0, 2));
     const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
       version: number;
     }[];
@@ -140,7 +140,7 @@ describe("the real, shipped migration list (v1 settings + v2 rates)", () => {
       .all();
     expect(ratesTableBefore).toHaveLength(0);
 
-    runMigrations(db); // full, real list — should apply only the newly-pending migration 2
+    runMigrations(db, realMigrations.slice(0, 2)); // v1+v2 list — should apply only the newly-pending migration 2
 
     const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
       version: number;
@@ -157,6 +157,72 @@ describe("the real, shipped migration list (v1 settings + v2 rates)", () => {
     runMigrations(db);
     runMigrations(db);
     const rates = db.prepare("SELECT * FROM rates").all();
+    expect(rates).toHaveLength(8);
+    db.close();
+  });
+});
+
+describe("the real, shipped migration list (v1 settings + v2 rates + v3 customers)", () => {
+  it("creates the settings, rates, and customers tables from a fresh database", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('settings', 'rates', 'customers')")
+      .all() as { name: string }[];
+    expect(tables.map((t) => t.name).sort()).toEqual(["customers", "rates", "settings"]);
+    db.close();
+  });
+
+  it("records all three migration versions", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((r) => r.version)).toEqual([1, 2, 3]);
+    db.close();
+  });
+
+  it("creates an empty customers table on a fresh database (no invented seed data)", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const customers = db.prepare("SELECT * FROM customers").all();
+    expect(customers).toHaveLength(0);
+    db.close();
+  });
+
+  it("does not disturb settings or rates data when adding migration 3", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 2));
+    db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))").run(
+      "phase3Test",
+      "still here"
+    );
+
+    runMigrations(db); // full, real list — should apply only the newly-pending migration 3
+
+    const settingRow = db.prepare("SELECT value FROM settings WHERE key = 'phase3Test'").get() as
+      | { value: string }
+      | undefined;
+    expect(settingRow?.value).toBe("still here");
+
+    const rates = db.prepare("SELECT * FROM rates").all();
+    expect(rates).toHaveLength(8);
+
+    const versions = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(versions.map((v) => v.version)).toEqual([1, 2, 3]);
+    db.close();
+  });
+
+  it("running the full list twice is safe and does not duplicate anything", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    runMigrations(db);
+    const customers = db.prepare("SELECT * FROM customers").all();
+    const rates = db.prepare("SELECT * FROM rates").all();
+    expect(customers).toHaveLength(0);
     expect(rates).toHaveLength(8);
     db.close();
   });

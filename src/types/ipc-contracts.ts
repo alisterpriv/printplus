@@ -23,9 +23,33 @@ export interface RatesApi {
   update(id: number, rate: number): Promise<void>;
 }
 
+export interface Customer {
+  id: number;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerInput {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+}
+
+export interface CustomersApi {
+  list(): Promise<Customer[]>;
+  create(input: CustomerInput): Promise<Customer>;
+  update(id: number, input: CustomerInput): Promise<void>;
+}
+
 export interface PrintPlusApi {
   settings: SettingsApi;
   rates: RatesApi;
+  customers: CustomersApi;
 }
 
 declare global {

@@ -63,4 +63,25 @@ export const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 3,
+    name: "create_customers",
+    up: (db) => {
+      // No seed data here, unlike rates: there is no existing hardcoded
+      // customer list to preserve continuity with, and inventing sample
+      // customers would misrepresent a real shop's data. A fresh install
+      // simply starts with zero customers.
+      db.exec(`
+        CREATE TABLE customers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          phone TEXT,
+          email TEXT,
+          address TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+    },
+  },
 ];

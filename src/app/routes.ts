@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router";
+import { createHashRouter } from "react-router";
 import { Root } from "./components/Root";
 import { Dashboard } from "./components/Dashboard";
 import { CreateBill } from "./components/CreateBill";
@@ -8,7 +8,12 @@ import { Customers } from "./components/Customers";
 import { Settings } from "./components/Settings";
 import { PrintInvoice } from "./components/PrintInvoice";
 
-export const router = createBrowserRouter([
+// createBrowserRouter matches routes against location.pathname, which
+// under Electron's file:// loading is the full filesystem path to
+// index.html rather than "/" — no route would ever match. createHashRouter
+// keeps the route in the URL hash instead, which is unaffected by where
+// the file was loaded from.
+export const router = createHashRouter([
   {
     path: "/",
     Component: Root,

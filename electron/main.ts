@@ -5,6 +5,7 @@ import { createConnection } from "./db/connection";
 import { runMigrations } from "./db/migrate";
 import { registerSettingsHandlers } from "./ipc/settingsHandlers";
 import { registerRatesHandlers } from "./ipc/ratesHandlers";
+import { registerCustomersHandlers } from "./ipc/customersHandlers";
 
 let db: DatabaseSync | undefined;
 
@@ -29,6 +30,7 @@ app.whenReady().then(() => {
     runMigrations(db);
     registerSettingsHandlers(db);
     registerRatesHandlers(db);
+    registerCustomersHandlers(db);
   } catch (error) {
     console.error("[startup] failed to initialize the database:", error);
     dialog.showErrorBox(
