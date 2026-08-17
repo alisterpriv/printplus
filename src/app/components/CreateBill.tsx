@@ -7,6 +7,12 @@ import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Trash2, Plus, Printer, Save, FileDown } from "lucide-react";
 import { toast } from "sonner";
+import {
+  calculateAreaInSquareMeters,
+  calculateItemTotal,
+  calculateBillSummary,
+  type LengthUnit,
+} from "../../domain/pricing";
 
 interface BillItem {
   id: string;
@@ -28,11 +34,11 @@ const printTypes = [
   { name: "Custom", rate: 0 },
 ];
 
-const units = [
-  { name: "Meter", toMeter: 1 },
-  { name: "Centimeter", toMeter: 0.01 },
-  { name: "Inch", toMeter: 0.0254 },
-  { name: "Feet", toMeter: 0.3048 },
+const units: { name: LengthUnit }[] = [
+  { name: "Meter" },
+  { name: "Centimeter" },
+  { name: "Inch" },
+  { name: "Feet" },
 ];
 
 export function CreateBill() {
@@ -45,7 +51,7 @@ export function CreateBill() {
 
   // Print Job Details
   const [printType, setPrintType] = useState("");
-  const [unit, setUnit] = useState("Meter");
+  const [unit, setUnit] = useState<LengthUnit>("Meter");
   const [width, setWidth] = useState("");
   const [height, setHeight] = useState("");
   const [rate, setRate] = useState("");
@@ -63,8 +69,7 @@ export function CreateBill() {
     if (!width || !height || !unit) return 0;
     const w = parseFloat(width);
     const h = parseFloat(height);
-    const unitMultiplier = units.find(u => u.name === unit)?.toMeter || 1;
-    return w * h * unitMultiplier * unitMultiplier;
+    return calculateAreaInSquareMeters(w, h, unit);
   };
 
   const area = calculateArea();
@@ -93,7 +98,7 @@ export function CreateBill() {
       area: area,
       rate: parseFloat(rate),
       quantity: parseInt(quantity),
-      total: area * parseFloat(rate) * parseInt(quantity),
+      total: calculateItemTotal(area, parseFloat(rate), parseInt(quantity)),
     };
 
     setItems([...items, newItem]);
@@ -115,11 +120,11 @@ export function CreateBill() {
   };
 
   // Calculate totals
-  const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-  const discountAmount = (subtotal * parseFloat(discount || "0")) / 100;
-  const taxableAmount = subtotal - discountAmount;
-  const gstAmount = (taxableAmount * parseFloat(gst || "0")) / 100;
-  const grandTotal = taxableAmount + gstAmount;
+  const { subtotal, discountAmount, gstAmount, grandTotal } = calculateBillSummary(
+    items.map((item) => item.total),
+    parseFloat(discount || "0"),
+    parseFloat(gst || "0")
+  );
 
   // Print Invoice
   const handlePrintInvoice = () => {
@@ -221,7 +226,7 @@ export function CreateBill() {
 
               <div className="md:col-span-2">
                 <Label htmlFor="unit">Unit</Label>
-                <Select value={unit} onValueChange={setUnit}>
+                <Select value={unit} onValueChange={(value) => setUnit(value as LengthUnit)}>
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
@@ -300,7 +305,7 @@ export function CreateBill() {
                 <Label>Total Price</Label>
                 <div className="mt-1 p-3 bg-blue-50 rounded-lg border border-blue-200">
                   <p className="text-2xl font-bold text-[#2563EB]">
-                    ₹{(area * parseFloat(rate || "0") * parseInt(quantity || "1")).toFixed(2)}
+                    ₹{calculateItemTotal(area, parseFloat(rate || "0"), parseInt(quantity || "1")).toFixed(2)}
                   </p>
                 </div>
               </div>
