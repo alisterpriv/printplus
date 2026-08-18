@@ -91,25 +91,261 @@ describe("ordersService", () => {
     expect(() => createOrder(db, baseInput(999999))).toThrow(CustomerNotFoundError);
   });
 
-  it("does not reject a zero width — preserves the Phase 2 discovered billing issue rather than fixing it", () => {
-    expect(() =>
-      createOrder(
-        db,
-        baseInput(customerId, {
-          items: [{ printType: "Flex", width: 0, height: 3, unit: "Meter", rate: 500, quantity: 1 }],
-        })
-      )
-    ).not.toThrow();
+  describe("PHASE 8 — item validation", () => {
+    it("rejects a zero width", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 0, height: 3, unit: "Meter", rate: 500, quantity: 1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a negative width", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: -2, height: 3, unit: "Meter", rate: 500, quantity: 1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a zero height", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 2, height: 0, unit: "Meter", rate: 500, quantity: 1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a negative height", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 2, height: -3, unit: "Meter", rate: 500, quantity: 1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("accepts decimal dimensions", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 2.5, height: 1.25, unit: "Meter", rate: 500, quantity: 1 }],
+          })
+        )
+      ).not.toThrow();
+    });
+
+    it("rejects a dimension above the sanity ceiling (normalized to meters)", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1001, height: 1, unit: "Meter", rate: 500, quantity: 1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a dimension above the sanity ceiling even in a small unit (Centimeter)", () => {
+      // 1000 meters = 100,000 cm — one cm over that should still be rejected.
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 100_001, height: 1, unit: "Centimeter", rate: 500, quantity: 1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("accepts a dimension exactly at the sanity ceiling", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1000, height: 1, unit: "Meter", rate: 500, quantity: 1 }],
+          })
+        )
+      ).not.toThrow();
+    });
+
+    it("rejects a zero rate", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 0, quantity: 1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a negative rate", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: -10, quantity: 1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a rate above the shared MAX_RATE ceiling", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 1_000_001, quantity: 1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("accepts a rate exactly at the MAX_RATE ceiling", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 1_000_000, quantity: 1 }],
+          })
+        )
+      ).not.toThrow();
+    });
+
+    it("rejects a zero quantity", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 500, quantity: 0 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a negative quantity", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 500, quantity: -1 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a fractional quantity instead of silently truncating it", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 500, quantity: 2.5 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a quantity above the sanity ceiling", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 500, quantity: 100_001 }],
+          })
+        )
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("accepts a quantity exactly at the sanity ceiling", () => {
+      expect(() =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 500, quantity: 100_000 }],
+          })
+        )
+      ).not.toThrow();
+    });
   });
 
-  it("does not reject a negative rate — preserves pricing.ts's documented pass-through behavior", () => {
-    const order = createOrder(
-      db,
-      baseInput(customerId, {
-        items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: -10, quantity: 1 }],
-      })
-    );
-    expect(order.items[0].total).toBe(-10);
+  describe("PHASE 8 — discount/GST validation", () => {
+    it("accepts 0% discount and 0% GST", () => {
+      expect(() => createOrder(db, baseInput(customerId, { discountPercent: 0, gstPercent: 0 }))).not.toThrow();
+    });
+
+    it("accepts 100% discount and 100% GST", () => {
+      expect(() => createOrder(db, baseInput(customerId, { discountPercent: 100, gstPercent: 100 }))).not.toThrow();
+    });
+
+    it("rejects a negative discount", () => {
+      expect(() => createOrder(db, baseInput(customerId, { discountPercent: -1 }))).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a discount above 100", () => {
+      expect(() => createOrder(db, baseInput(customerId, { discountPercent: 101 }))).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a negative GST", () => {
+      expect(() => createOrder(db, baseInput(customerId, { gstPercent: -1 }))).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a GST above 100", () => {
+      expect(() => createOrder(db, baseInput(customerId, { gstPercent: 101 }))).toThrow(InvalidOrderValueError);
+    });
+  });
+
+  describe("PHASE 8 — deterministic paise-integer money", () => {
+    it("produces a grand total that exactly equals subtotal - discount + gst, for float-drift-prone inputs", () => {
+      // 10.10 + 20.20 famously does not equal a clean 30.30 in IEEE-754 —
+      // this is the exact scenario the paise-integer summary math (rather
+      // than a rupee-float round trip) is meant to make deterministic.
+      const order = createOrder(
+        db,
+        baseInput(customerId, {
+          items: [
+            { printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 10.1, quantity: 1 },
+            { printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 20.2, quantity: 1 },
+          ],
+          discountPercent: 10,
+          gstPercent: 18,
+        })
+      );
+      const subtotalPaise = Math.round(order.subtotal * 100);
+      const discountPaise = Math.round(order.discountAmount * 100);
+      const gstPaise = Math.round(order.gstAmount * 100);
+      const grandTotalPaise = Math.round(order.grandTotal * 100);
+      expect(grandTotalPaise).toBe(subtotalPaise - discountPaise + gstPaise);
+      expect(subtotalPaise).toBe(3030); // 10.10 + 20.20 = 30.30 exactly, in paise
+    });
+
+    it("rounding is deterministic across repeated identical calls", () => {
+      const makeOrder = () =>
+        createOrder(
+          db,
+          baseInput(customerId, {
+            items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 33.335, quantity: 3 }],
+            discountPercent: 12.5,
+            gstPercent: 18,
+          })
+        );
+      const first = makeOrder();
+      const second = makeOrder();
+      expect(second.grandTotal).toBe(first.grandTotal);
+      expect(second.gstAmount).toBe(first.gstAmount);
+    });
   });
 
   it("rounds rupee amounts to the nearest paisa at the persistence boundary", () => {

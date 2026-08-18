@@ -50,6 +50,68 @@ const units: { name: LengthUnit }[] = [
   { name: "Feet" },
 ];
 
+/**
+ * PHASE 8 — immediate UI feedback mirroring the authoritative business
+ * rules enforced server-side in electron/services/ordersService.ts
+ * (validateItemInput). Deliberately does not duplicate the sanity-ceiling
+ * numbers (MAX_DIMENSION_METERS/MAX_RATE/MAX_QUANTITY) — those are rare
+ * data-entry-mistake guards, not everyday feedback, and are already
+ * surfaced via the real backend error message (see getErrorMessage) if
+ * ever hit. The backend remains authoritative regardless of what this
+ * function allows through.
+ */
+interface ItemFieldErrors {
+  printType?: string;
+  width?: string;
+  height?: string;
+  rate?: string;
+  quantity?: string;
+}
+
+function validateItemFields(
+  printType: string,
+  width: string,
+  height: string,
+  rate: string,
+  quantity: string
+): ItemFieldErrors {
+  const errors: ItemFieldErrors = {};
+
+  if (!printType) {
+    errors.printType = "Please select a print type.";
+  }
+
+  const w = parseFloat(width);
+  if (width === "" || Number.isNaN(w) || w <= 0) {
+    errors.width = "Width must be greater than zero.";
+  }
+
+  const h = parseFloat(height);
+  if (height === "" || Number.isNaN(h) || h <= 0) {
+    errors.height = "Height must be greater than zero.";
+  }
+
+  const r = parseFloat(rate);
+  if (rate === "" || Number.isNaN(r) || r <= 0) {
+    errors.rate = "Rate must be greater than zero.";
+  }
+
+  const q = Number(quantity);
+  if (quantity === "" || Number.isNaN(q) || !Number.isInteger(q) || q < 1) {
+    errors.quantity = "Quantity must be a whole number of 1 or more.";
+  }
+
+  return errors;
+}
+
+function validatePercentField(value: string): string | undefined {
+  const n = parseFloat(value || "0");
+  if (Number.isNaN(n) || n < 0 || n > 100) {
+    return "Must be between 0 and 100.";
+  }
+  return undefined;
+}
+
 export function CreateBill() {
   const navigate = useNavigate();
   
@@ -76,6 +138,11 @@ export function CreateBill() {
   const [height, setHeight] = useState("");
   const [rate, setRate] = useState("");
   const [quantity, setQuantity] = useState("1");
+  // PHASE 8 — only show item-field validation errors after a failed Add
+  // Item attempt, not on first render (width/height/rate start empty,
+  // which would otherwise show as an error before the user has typed
+  // anything).
+  const [showItemErrors, setShowItemErrors] = useState(false);
 
   // Bill Items
   const [items, setItems] = useState<BillItem[]>([]);
@@ -146,6 +213,10 @@ export function CreateBill() {
 
   const area = calculateArea();
 
+  const itemFieldErrors = validateItemFields(printType, width, height, rate, quantity);
+  const discountError = validatePercentField(discount);
+  const gstError = validatePercentField(gst);
+
   // Handle print type change
   const handlePrintTypeChange = (value: string) => {
     setPrintType(value);
@@ -157,8 +228,9 @@ export function CreateBill() {
 
   // Add item to bill
   const addItem = () => {
-    if (!printType || !width || !height || !rate || !quantity) {
-      toast.error("Please fill all fields");
+    if (Object.keys(itemFieldErrors).length > 0) {
+      setShowItemErrors(true);
+      toast.error("Please fix the highlighted fields");
       return;
     }
 
@@ -170,19 +242,20 @@ export function CreateBill() {
       unit,
       area: area,
       rate: parseFloat(rate),
-      quantity: parseInt(quantity),
-      total: calculateItemTotal(area, parseFloat(rate), parseInt(quantity)),
+      quantity: Number(quantity),
+      total: calculateItemTotal(area, parseFloat(rate), Number(quantity)),
     };
 
     setItems([...items, newItem]);
-    
+
     // Reset form
+    setShowItemErrors(false);
     setPrintType("");
     setWidth("");
     setHeight("");
     setRate("");
     setQuantity("1");
-    
+
     toast.success("Item added to bill");
   };
 
@@ -210,6 +283,10 @@ export function CreateBill() {
     }
     if (!selectedCustomer) {
       toast.error("Please select a customer");
+      return;
+    }
+    if (discountError || gstError) {
+      toast.error("Please fix the highlighted fields");
       return;
     }
 
@@ -329,6 +406,9 @@ export function CreateBill() {
                     No print types configured — add rates in Rate Settings first.
                   </p>
                 )}
+                {showItemErrors && itemFieldErrors.printType && (
+                  <p className="text-sm text-red-600 mt-1">{itemFieldErrors.printType}</p>
+                )}
               </div>
 
               <div className="md:col-span-2">
@@ -357,7 +437,11 @@ export function CreateBill() {
                   placeholder="Enter width"
                   className="mt-1"
                   step="0.01"
+                  min="0.01"
                 />
+                {showItemErrors && itemFieldErrors.width && (
+                  <p className="text-sm text-red-600 mt-1">{itemFieldErrors.width}</p>
+                )}
               </div>
 
               <div>
@@ -370,7 +454,11 @@ export function CreateBill() {
                   placeholder="Enter height"
                   className="mt-1"
                   step="0.01"
+                  min="0.01"
                 />
+                {showItemErrors && itemFieldErrors.height && (
+                  <p className="text-sm text-red-600 mt-1">{itemFieldErrors.height}</p>
+                )}
               </div>
 
               <div className="md:col-span-2">
@@ -392,7 +480,11 @@ export function CreateBill() {
                   placeholder="Enter rate"
                   className="mt-1"
                   step="0.01"
+                  min="0.01"
                 />
+                {showItemErrors && itemFieldErrors.rate && (
+                  <p className="text-sm text-red-600 mt-1">{itemFieldErrors.rate}</p>
+                )}
               </div>
 
               <div>
@@ -405,14 +497,18 @@ export function CreateBill() {
                   placeholder="Enter quantity"
                   className="mt-1"
                   min="1"
+                  step="1"
                 />
+                {showItemErrors && itemFieldErrors.quantity && (
+                  <p className="text-sm text-red-600 mt-1">{itemFieldErrors.quantity}</p>
+                )}
               </div>
 
               <div className="md:col-span-2">
                 <Label>Total Price</Label>
                 <div className="mt-1 p-3 bg-blue-50 rounded-lg border border-blue-200">
                   <p className="text-2xl font-bold text-[#2563EB]">
-                    ₹{calculateItemTotal(area, parseFloat(rate || "0"), parseInt(quantity || "1")).toFixed(2)}
+                    ₹{calculateItemTotal(area, parseFloat(rate || "0"), Number(quantity || "1")).toFixed(2)}
                   </p>
                 </div>
               </div>
@@ -494,7 +590,11 @@ export function CreateBill() {
                   min="0"
                   max="100"
                 />
-                <p className="text-sm text-gray-500 mt-1">- ₹{discountAmount.toFixed(2)}</p>
+                {discountError ? (
+                  <p className="text-sm text-red-600 mt-1">{discountError}</p>
+                ) : (
+                  <p className="text-sm text-gray-500 mt-1">- ₹{discountAmount.toFixed(2)}</p>
+                )}
               </div>
 
               <div>
@@ -507,8 +607,13 @@ export function CreateBill() {
                   placeholder="18"
                   className="mt-1"
                   min="0"
+                  max="100"
                 />
-                <p className="text-sm text-gray-500 mt-1">+ ₹{gstAmount.toFixed(2)}</p>
+                {gstError ? (
+                  <p className="text-sm text-red-600 mt-1">{gstError}</p>
+                ) : (
+                  <p className="text-sm text-gray-500 mt-1">+ ₹{gstAmount.toFixed(2)}</p>
+                )}
               </div>
 
               <div className="pt-4 border-t border-gray-200">

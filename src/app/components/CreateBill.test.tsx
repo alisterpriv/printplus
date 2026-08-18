@@ -152,4 +152,115 @@ describe("CreateBill", () => {
 
     expect(api.orders.create).not.toHaveBeenCalled();
   });
+
+  describe("PHASE 8 — inline validation", () => {
+    it("shows an inline error and does not add an item when width is zero", async () => {
+      mockApi();
+      const user = userEvent.setup();
+      renderCreateBill();
+
+      const [, printTypeTrigger] = await getEnabledComboboxes();
+      await user.click(printTypeTrigger);
+      await user.click(await screen.findByText("Flex"));
+
+      await user.type(screen.getByLabelText(/width/i), "0");
+      await user.type(screen.getByLabelText(/height/i), "3");
+      await user.click(screen.getByRole("button", { name: /add item/i }));
+
+      expect(await screen.findByText("Width must be greater than zero.")).toBeTruthy();
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
+    it("shows an inline error and does not add an item when rate is negative", async () => {
+      mockApi();
+      const user = userEvent.setup();
+      renderCreateBill();
+
+      const [, printTypeTrigger] = await getEnabledComboboxes();
+      await user.click(printTypeTrigger);
+      await user.click(await screen.findByText("Flex"));
+
+      await user.type(screen.getByLabelText(/width/i), "2");
+      await user.type(screen.getByLabelText(/height/i), "3");
+      const rateInput = screen.getByLabelText(/rate/i);
+      await user.clear(rateInput);
+      await user.type(rateInput, "-10");
+      await user.click(screen.getByRole("button", { name: /add item/i }));
+
+      expect(await screen.findByText("Rate must be greater than zero.")).toBeTruthy();
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
+    it("rejects a fractional quantity with an inline error instead of silently truncating it", async () => {
+      mockApi();
+      const user = userEvent.setup();
+      renderCreateBill();
+
+      const [, printTypeTrigger] = await getEnabledComboboxes();
+      await user.click(printTypeTrigger);
+      await user.click(await screen.findByText("Flex"));
+
+      await user.type(screen.getByLabelText(/width/i), "2");
+      await user.type(screen.getByLabelText(/height/i), "3");
+      const quantityInput = screen.getByLabelText(/quantity/i);
+      await user.clear(quantityInput);
+      await user.type(quantityInput, "2.5");
+      await user.click(screen.getByRole("button", { name: /add item/i }));
+
+      expect(await screen.findByText("Quantity must be a whole number of 1 or more.")).toBeTruthy();
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
+    it("adds the item once the invalid field is corrected, clearing the inline error", async () => {
+      mockApi();
+      const user = userEvent.setup();
+      renderCreateBill();
+
+      const [, printTypeTrigger] = await getEnabledComboboxes();
+      await user.click(printTypeTrigger);
+      await user.click(await screen.findByText("Flex"));
+
+      await user.type(screen.getByLabelText(/width/i), "0");
+      await user.type(screen.getByLabelText(/height/i), "3");
+      await user.click(screen.getByRole("button", { name: /add item/i }));
+      expect(await screen.findByText("Width must be greater than zero.")).toBeTruthy();
+
+      const widthInput = screen.getByLabelText(/width/i);
+      await user.clear(widthInput);
+      await user.type(widthInput, "2");
+      expect(screen.queryByText("Width must be greater than zero.")).toBeNull();
+    });
+
+    it("blocks Print Invoice and shows an inline error when GST is out of range", async () => {
+      const api = mockApi();
+      const user = userEvent.setup();
+      renderCreateBill();
+
+      await addOneFlexItem(user, true);
+
+      const gstInput = screen.getByLabelText(/gst/i);
+      await user.clear(gstInput);
+      await user.type(gstInput, "150");
+      await user.click(screen.getByRole("button", { name: /print invoice/i }));
+
+      expect(await screen.findByText("Must be between 0 and 100.")).toBeTruthy();
+      expect(api.orders.create).not.toHaveBeenCalled();
+    });
+
+    it("blocks Print Invoice and shows an inline error when discount is negative", async () => {
+      const api = mockApi();
+      const user = userEvent.setup();
+      renderCreateBill();
+
+      await addOneFlexItem(user, true);
+
+      const discountInput = screen.getByLabelText(/discount/i);
+      await user.clear(discountInput);
+      await user.type(discountInput, "-5");
+      await user.click(screen.getByRole("button", { name: /print invoice/i }));
+
+      expect(await screen.findByText("Must be between 0 and 100.")).toBeTruthy();
+      expect(api.orders.create).not.toHaveBeenCalled();
+    });
+  });
 });

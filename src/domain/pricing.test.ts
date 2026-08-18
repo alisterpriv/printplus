@@ -3,6 +3,9 @@ import {
   calculateAreaInSquareMeters,
   calculateItemTotal,
   calculateBillSummary,
+  calculateBillSummaryPaise,
+  rupeesToPaise,
+  paiseToRupees,
 } from "./pricing";
 
 describe("calculateAreaInSquareMeters", () => {
@@ -172,5 +175,90 @@ describe("calculateBillSummary", () => {
     expect(summary.discountAmount).toBe(-10);
     expect(summary.taxableAmount).toBe(110);
     expect(summary.gstAmount).toBeCloseTo(-5.5, 10);
+  });
+});
+
+describe("rupeesToPaise / paiseToRupees", () => {
+  it("converts a whole rupee amount", () => {
+    expect(rupeesToPaise(10)).toBe(1000);
+    expect(paiseToRupees(1000)).toBe(10);
+  });
+
+  it("rounds an exact .5 tie up at the sub-paisa boundary (Math.round's actual rule)", () => {
+    expect(rupeesToPaise(10.005)).toBe(1001); // 1000.5 -> 1001, not 1000
+    expect(rupeesToPaise(10.004)).toBe(1000);
+  });
+
+  it("rounds a value that is not exactly representable in binary floating point", () => {
+    // 10.999 * 100 is 1099.9000000000001 in IEEE-754, not a clean 1099.9
+    expect(rupeesToPaise(10.999)).toBe(1100);
+  });
+
+  it("round-trips a paise integer back to the exact same rupee value", () => {
+    expect(paiseToRupees(rupeesToPaise(45.5))).toBe(45.5);
+  });
+
+  it("handles a negative amount consistently (pure conversion, not a business rule)", () => {
+    expect(rupeesToPaise(-10.5)).toBe(-1050);
+  });
+});
+
+describe("calculateBillSummaryPaise", () => {
+  it("returns all zeros for an empty item list", () => {
+    const summary = calculateBillSummaryPaise([], 0, 18);
+    expect(summary).toEqual({
+      subtotalPaise: 0,
+      discountPaise: 0,
+      taxablePaise: 0,
+      gstPaise: 0,
+      grandTotalPaise: 0,
+    });
+  });
+
+  it("matches calculateBillSummary's rupee result exactly for clean, no-drift inputs", () => {
+    const rupeeResult = calculateBillSummary([60, 72], 10, 18);
+    const paiseResult = calculateBillSummaryPaise([6000, 7200], 10, 18);
+    expect(paiseResult.subtotalPaise).toBe(Math.round(rupeeResult.subtotal * 100));
+    expect(paiseResult.discountPaise).toBe(Math.round(rupeeResult.discountAmount * 100));
+    expect(paiseResult.gstPaise).toBe(Math.round(rupeeResult.gstAmount * 100));
+  });
+
+  it("PHASE 8: produces a deterministic result for the classic 10.10 + 20.20 float-drift example", () => {
+    // Per-item paise are already rounded (1010 + 2020) before summing —
+    // integer addition, so there is no float drift left to reason about.
+    const summary = calculateBillSummaryPaise([1010, 2020], 0, 0);
+    expect(summary.subtotalPaise).toBe(3030); // exactly 30.30, not 30.299999999999997
+  });
+
+  it("grandTotalPaise always exactly equals subtotalPaise - discountPaise + gstPaise (never independently rounded)", () => {
+    const summary = calculateBillSummaryPaise([13337], 12.5, 18);
+    expect(summary.grandTotalPaise).toBe(summary.taxablePaise + summary.gstPaise);
+    expect(summary.taxablePaise).toBe(summary.subtotalPaise - summary.discountPaise);
+  });
+
+  it("rounds discountPaise and gstPaise at exactly one point each, via Math.round", () => {
+    // subtotal 100 paise * 12.5% = 12.5 -> rounds to 13
+    const summary = calculateBillSummaryPaise([100], 12.5, 0);
+    expect(summary.discountPaise).toBe(13);
+  });
+
+  it("computes GST on the post-discount (taxable) paise amount, not the subtotal", () => {
+    const summary = calculateBillSummaryPaise([10000], 10, 18);
+    expect(summary.taxablePaise).toBe(9000);
+    expect(summary.gstPaise).toBe(1620); // 18% of 9000, not 10000
+  });
+
+  it("applies a 100% discount, zeroing out GST too (GST applies after discount)", () => {
+    const summary = calculateBillSummaryPaise([10000], 100, 18);
+    expect(summary.discountPaise).toBe(10000);
+    expect(summary.taxablePaise).toBe(0);
+    expect(summary.gstPaise).toBe(0);
+    expect(summary.grandTotalPaise).toBe(0);
+  });
+
+  it("is deterministic across repeated calls with the same input", () => {
+    const first = calculateBillSummaryPaise([33335 * 3], 12.5, 18);
+    const second = calculateBillSummaryPaise([33335 * 3], 12.5, 18);
+    expect(second).toEqual(first);
   });
 });

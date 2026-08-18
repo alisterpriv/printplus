@@ -1,8 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { listRates as repoListRates, updateRate, type Rate } from "../repositories/ratesRepository";
 
-/** A rate above this is almost certainly a data-entry mistake, not a real price. */
-const MAX_RATE = 1_000_000;
+/**
+ * A rate above this is almost certainly a data-entry mistake, not a real
+ * price. Exported so ordersService.ts can apply the same ceiling to
+ * order-item rates instead of defining a competing limit.
+ */
+export const MAX_RATE = 1_000_000;
 
 /** Thrown for a structurally-valid but business-invalid rate value. */
 export class InvalidRateValueError extends Error {}
