@@ -169,4 +169,27 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    name: "add_invoice_number_to_orders",
+    up: (db) => {
+      // SQLite allows adding a NOT NULL column to an existing table only
+      // if a DEFAULT is supplied — '' is a temporary placeholder,
+      // immediately overwritten below for every row (including pre-Phase-11
+      // orders) before any application code ever reads it, so the
+      // NOT NULL invariant holds from the moment this migration finishes.
+      // No table rebuild is needed to achieve this.
+      db.exec(`ALTER TABLE orders ADD COLUMN invoice_number TEXT NOT NULL DEFAULT ''`);
+
+      // Backfill: every existing order (and any pre-existing gaps in
+      // orders.id, e.g. from a rolled-back insert) gets a number derived
+      // from its own permanent id — never renumbered, never reordered.
+      // Same formula ordersRepository.ts uses for newly created orders.
+      db.exec(`UPDATE orders SET invoice_number = 'INV-' || printf('%06d', id)`);
+
+      // Enforced at the database layer, not just by application code —
+      // a duplicate invoice_number can never be persisted, by anyone.
+      db.exec(`CREATE UNIQUE INDEX idx_orders_invoice_number ON orders(invoice_number)`);
+    },
+  },
 ];

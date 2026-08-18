@@ -10,6 +10,7 @@ import type { Order, PrintPlusApi } from "../../types/ipc-contracts";
 // order would show the wrong values and fail.
 const PERSISTED_ORDER: Order = {
   id: 42,
+  invoiceNumber: "INV-000042",
   customerId: 5,
   customerName: "Ramesh (as of order date)",
   customerPhone: "9998887770",
@@ -80,6 +81,17 @@ describe("PrintInvoice", () => {
     // component only reads the order it was asked to display.
     expect(window.api.customers.list).not.toHaveBeenCalled();
     expect(window.api.rates.list).not.toHaveBeenCalled();
+  });
+
+  it("PHASE 11 — displays the real, persisted invoice number, not the raw internal order id", async () => {
+    const getOrder = vi.fn().mockResolvedValue(PERSISTED_ORDER);
+    renderInvoiceForOrder42({ get: getOrder });
+
+    expect(await screen.findByText(/Invoice #:\s*INV-000042/)).toBeTruthy();
+    // The raw id must never stand in for the invoice number on its own —
+    // it's still used internally for routing/fetching (window.api.orders.get(42)
+    // above), just never presented to the user as "Order #: 42" anymore.
+    expect(screen.queryByText(/Order #:\s*42/)).toBeNull();
   });
 
   it("shows a not-found state instead of a blank/crashed page for an order that no longer resolves", async () => {

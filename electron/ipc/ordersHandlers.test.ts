@@ -182,4 +182,27 @@ describe("handleOrdersList / handleOrdersGet / handleOrdersCreate / handleOrders
     expect(() => handleOrdersUpdateStatus(db, "nope")).toThrow(InvalidOrderRequestError);
     expect(() => handleOrdersUpdateStatus(db, { id: 1 })).toThrow(InvalidOrderRequestError);
   });
+
+  describe("PHASE 11 — invoice numbers", () => {
+    it("handleOrdersCreate returns an order with a real, server-derived invoice number", () => {
+      const created = handleOrdersCreate(db, validPayload());
+      expect(created.invoiceNumber).toBe(`INV-${String(created.id).padStart(6, "0")}`);
+    });
+
+    it("handleOrdersGet returns the same persisted invoice number", () => {
+      const created = handleOrdersCreate(db, validPayload());
+      expect(handleOrdersGet(db, created.id).invoiceNumber).toBe(created.invoiceNumber);
+    });
+
+    it("a renderer-supplied invoiceNumber in the create payload is ignored, not honored", () => {
+      const created = handleOrdersCreate(db, { ...validPayload(), invoiceNumber: "INV-999999" });
+      expect(created.invoiceNumber).not.toBe("INV-999999");
+      expect(created.invoiceNumber).toBe(`INV-${String(created.id).padStart(6, "0")}`);
+    });
+
+    it("validateOrderInput does not carry an injected invoiceNumber field through to the trusted NewOrderInput", () => {
+      const input = validateOrderInput({ ...validPayload(), invoiceNumber: "INV-999999" });
+      expect(input).not.toHaveProperty("invoiceNumber");
+    });
+  });
 });

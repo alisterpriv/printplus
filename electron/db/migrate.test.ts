@@ -319,7 +319,9 @@ describe("the real, shipped migration list (v1-v5, dashboard indexes)", () => {
   it("creates all three dashboard indexes on a fresh database", () => {
     const db = createConnection(":memory:");
     runMigrations(db);
-    expect(indexNames(db).sort()).toEqual(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"]);
+    expect(indexNames(db)).toEqual(
+      expect.arrayContaining(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"])
+    );
     db.close();
   });
 
@@ -344,7 +346,9 @@ describe("the real, shipped migration list (v1-v5, dashboard indexes)", () => {
       version: number;
     }[];
     expect(rows.map((v) => v.version)).toEqual(expect.arrayContaining([1, 2, 3, 4, 5]));
-    expect(indexNames(db).sort()).toEqual(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"]);
+    expect(indexNames(db)).toEqual(
+      expect.arrayContaining(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"])
+    );
     db.close();
   });
 
@@ -376,7 +380,9 @@ describe("the real, shipped migration list (v1-v5, dashboard indexes)", () => {
     const db = createConnection(":memory:");
     runMigrations(db);
     runMigrations(db);
-    expect(indexNames(db).sort()).toEqual(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"]);
+    expect(indexNames(db)).toEqual(
+      expect.arrayContaining(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"])
+    );
     db.close();
   });
 });
@@ -490,5 +496,186 @@ describe("the real, shipped migration list (v1-v6, business_settings)", () => {
     runMigrations(db);
     expect(db.prepare("SELECT * FROM business_settings").all()).toHaveLength(1);
     db.close();
+  });
+});
+
+describe("the real, shipped migration list (v1-v7, invoice numbers)", () => {
+  it("adds the invoice_number column, readable as an empty result set on a fresh database with no orders", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    expect(db.prepare("SELECT invoice_number FROM orders").all()).toHaveLength(0);
+    db.close();
+  });
+
+  it("records migration version 7 among the applied set", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((v) => v.version)).toEqual(expect.arrayContaining([1, 2, 3, 4, 5, 6, 7]));
+    db.close();
+  });
+
+  it("enforces UNIQUE on invoice_number at the database layer", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    db.prepare(
+      "INSERT INTO customers (name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("Ramesh", "123", null, "Road");
+    const customerId = (db.prepare("SELECT id FROM customers WHERE name = 'Ramesh'").get() as { id: number }).id;
+
+    const insertOrder = () =>
+      db
+        .prepare(
+          `INSERT INTO orders (
+             customer_id, customer_name, customer_phone, customer_address, status,
+             subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+             invoice_number, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'INV-000001', datetime('now'), datetime('now'))`
+        )
+        .run(customerId, "Ramesh", "123", "Road", "Pending", 5000, 0, 0, 18, 900, 5900);
+
+    insertOrder();
+    expect(insertOrder).toThrow();
+    db.close();
+  });
+
+  it("enforces NOT NULL on invoice_number at the database layer", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    db.prepare(
+      "INSERT INTO customers (name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("Ramesh", "123", null, "Road");
+    const customerId = (db.prepare("SELECT id FROM customers WHERE name = 'Ramesh'").get() as { id: number }).id;
+
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO orders (
+             customer_id, customer_name, customer_phone, customer_address, status,
+             subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+             invoice_number, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'), datetime('now'))`
+        )
+        .run(customerId, "Ramesh", "123", "Road", "Pending", 5000, 0, 0, 18, 900, 5900)
+    ).toThrow();
+    db.close();
+  });
+
+  it("backfills every pre-existing order with INV- plus its own six-digit zero-padded id, preserving gaps and all other fields", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 6));
+
+    db.prepare(
+      "INSERT INTO customers (name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("Ramesh", "9876543210", null, "12 MG Road");
+    const customerId = (db.prepare("SELECT id FROM customers WHERE name = 'Ramesh'").get() as { id: number }).id;
+
+    const insertOrder = () =>
+      db
+        .prepare(
+          `INSERT INTO orders (
+             customer_id, customer_name, customer_phone, customer_address, status,
+             subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+        )
+        .run(customerId, "Ramesh", "9876543210", "12 MG Road", "Pending", 5000, 0, 0, 18, 900, 5900);
+
+    // Three orders, then delete the middle one — its plain (non-AUTOINCREMENT-immune)
+    // absence simulates a gap in orders.id that migration 7 must preserve, not compact.
+    insertOrder();
+    const secondId = insertOrder().lastInsertRowid as number;
+    insertOrder();
+    db.prepare("DELETE FROM orders WHERE id = ?").run(secondId);
+
+    const before = db
+      .prepare("SELECT id, customer_id, status, subtotal_paise, grand_total_paise, created_at, updated_at FROM orders ORDER BY id")
+      .all();
+
+    runMigrations(db); // applies migration 7 on top of existing real data, including the gap
+
+    const after = db.prepare("SELECT * FROM orders ORDER BY id").all() as {
+      id: number;
+      invoice_number: string;
+      customer_id: number;
+      status: string;
+      subtotal_paise: number;
+      grand_total_paise: number;
+      created_at: string;
+      updated_at: string;
+    }[];
+
+    expect(after).toHaveLength(2);
+    expect(after.map((o) => o.id)).not.toContain(secondId); // gap preserved, not compacted
+    for (const [i, order] of after.entries()) {
+      expect(order.invoice_number).toBe(`INV-${String(order.id).padStart(6, "0")}`);
+      // Every other field is byte-for-byte the same as before the migration ran.
+      const original = before[i] as { id: number; customer_id: number; status: string; subtotal_paise: number; grand_total_paise: number; created_at: string; updated_at: string };
+      expect(order.id).toBe(original.id);
+      expect(order.customer_id).toBe(original.customer_id);
+      expect(order.status).toBe(original.status);
+      expect(order.subtotal_paise).toBe(original.subtotal_paise);
+      expect(order.grand_total_paise).toBe(original.grand_total_paise);
+      expect(order.created_at).toBe(original.created_at);
+      expect(order.updated_at).toBe(original.updated_at);
+    }
+
+    // invoice numbers are unique across the backfilled set
+    expect(new Set(after.map((o) => o.invoice_number)).size).toBe(after.length);
+    db.close();
+  });
+
+  it("leaves order_items untouched when backfilling invoice numbers", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 6));
+
+    db.prepare(
+      "INSERT INTO customers (name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("Ramesh", "123", null, "Road");
+    const customerId = (db.prepare("SELECT id FROM customers WHERE name = 'Ramesh'").get() as { id: number }).id;
+    const orderResult = db
+      .prepare(
+        `INSERT INTO orders (
+           customer_id, customer_name, customer_phone, customer_address, status,
+           subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      )
+      .run(customerId, "Ramesh", "123", "Road", "Pending", 50000, 0, 0, 18, 9000, 59000);
+    db.prepare(
+      `INSERT INTO order_items (order_id, print_type, width, height, unit, area_sq_meters, rate_paise, quantity, total_paise)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(orderResult.lastInsertRowid, "Flex", 2, 3, "Meter", 6, 50000, 1, 50000);
+
+    runMigrations(db);
+
+    const items = db.prepare("SELECT * FROM order_items").all();
+    expect(items).toHaveLength(1);
+    db.close();
+  });
+
+  it("applying the full list twice is safe and does not alter already-backfilled invoice numbers", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 6));
+    db.prepare(
+      "INSERT INTO customers (name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("Ramesh", "123", null, "Road");
+    const customerId = (db.prepare("SELECT id FROM customers WHERE name = 'Ramesh'").get() as { id: number }).id;
+    db.prepare(
+      `INSERT INTO orders (
+         customer_id, customer_name, customer_phone, customer_address, status,
+         subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+    ).run(customerId, "Ramesh", "123", "Road", "Pending", 5000, 0, 0, 18, 900, 5900);
+
+    runMigrations(db);
+    const first = db.prepare("SELECT invoice_number FROM orders").all();
+    runMigrations(db); // idempotent — migration 7 is already recorded, must not re-run
+    const second = db.prepare("SELECT invoice_number FROM orders").all();
+
+    expect(second).toEqual(first);
   });
 });

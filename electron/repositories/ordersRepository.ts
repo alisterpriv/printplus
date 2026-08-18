@@ -14,6 +14,7 @@ export interface OrderItem {
 
 export interface Order {
   id: number;
+  invoiceNumber: string;
   customerId: number;
   customerName: string;
   customerPhone: string | null;
@@ -60,6 +61,7 @@ export interface CreateOrderInput {
 
 interface OrderRow {
   id: number;
+  invoice_number: string;
   customer_id: number;
   customer_name: string;
   customer_phone: string | null;
@@ -112,6 +114,7 @@ function toOrderItem(row: OrderItemRow): OrderItem {
 function toOrder(row: OrderRow, items: OrderItem[]): Order {
   return {
     id: row.id,
+    invoiceNumber: row.invoice_number,
     customerId: row.customer_id,
     customerName: row.customer_name,
     customerPhone: row.customer_phone,
@@ -155,11 +158,18 @@ export function getOrder(db: DatabaseSync, id: number): Order {
   return toOrder(row, getItemsForOrder(db, id));
 }
 
+/** Matches the same "INV-" + 6-digit-minimum-width formula migration 7 used to backfill existing orders. */
+function invoiceNumberForId(id: number): string {
+  return `INV-${String(id).padStart(6, "0")}`;
+}
+
 /**
- * Inserts the order and all of its items in a single transaction. If any
- * item insert fails, the whole transaction (including the order row
- * itself) is rolled back — there must never be a persisted order without
- * all of its items.
+ * Inserts the order and all of its items in a single transaction, deriving
+ * invoice_number from the order's own generated id immediately after
+ * insert and before anything else happens. If any item insert fails, the
+ * whole transaction (including the order row and its invoice number) is
+ * rolled back — there must never be a persisted order without all of its
+ * items, and never an order whose invoice number didn't survive with it.
  */
 export function createOrder(db: DatabaseSync, input: CreateOrderInput): Order {
   db.exec("BEGIN");
@@ -169,8 +179,8 @@ export function createOrder(db: DatabaseSync, input: CreateOrderInput): Order {
         `INSERT INTO orders (
            customer_id, customer_name, customer_phone, customer_address, status,
            subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
-           created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+           invoice_number, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', datetime('now'), datetime('now'))`
       )
       .run(
         input.customerId,
@@ -187,6 +197,8 @@ export function createOrder(db: DatabaseSync, input: CreateOrderInput): Order {
       );
 
     const orderId = orderResult.lastInsertRowid as number;
+
+    db.prepare("UPDATE orders SET invoice_number = ? WHERE id = ?").run(invoiceNumberForId(orderId), orderId);
 
     const insertItem = db.prepare(
       `INSERT INTO order_items (order_id, print_type, width, height, unit, area_sq_meters, rate_paise, quantity, total_paise)

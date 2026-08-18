@@ -32,7 +32,7 @@ export function Orders() {
   }, []);
 
   const filteredOrders = orders.filter(order =>
-    String(order.id).includes(searchQuery.toLowerCase()) ||
+    order.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     order.customerPhone?.includes(searchQuery)
   );
@@ -76,7 +76,7 @@ export function Orders() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <Input
               type="text"
-              placeholder="Search by order ID, customer name, or phone..."
+              placeholder="Search by invoice number, customer name, or phone..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"
@@ -116,7 +116,7 @@ export function Orders() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Order ID</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Invoice #</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Customer</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Phone</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Items</th>
@@ -132,7 +132,7 @@ export function Orders() {
                 const created = new Date((order.createdAt.replace(" ", "T")) + "Z");
                 return (
                   <tr key={order.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 text-sm font-medium text-[#2563EB]">#{order.id}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-[#2563EB]">{order.invoiceNumber}</td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">{order.customerName}</td>
                     <td className="px-6 py-4 text-sm text-gray-600">{order.customerPhone || "—"}</td>
                     <td className="px-6 py-4 text-sm text-gray-900">{order.items.length}</td>

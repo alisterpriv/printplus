@@ -62,6 +62,7 @@ export interface OrderItem {
 
 export interface Order {
   id: number;
+  invoiceNumber: string;
   customerId: number;
   customerName: string;
   customerPhone: string | null;

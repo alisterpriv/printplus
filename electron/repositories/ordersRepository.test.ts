@@ -18,6 +18,10 @@ import {
   type CreateOrderInput,
 } from "./ordersRepository";
 
+function invoiceNumberForId(id: number): string {
+  return `INV-${String(id).padStart(6, "0")}`;
+}
+
 function baseOrderInput(customerId: number, overrides: Partial<CreateOrderInput> = {}): CreateOrderInput {
   return {
     customerId,
@@ -143,32 +147,93 @@ describe("ordersRepository", () => {
       expect(listOrders(db)).toHaveLength(0);
       expect(db.prepare("SELECT * FROM order_items").all()).toHaveLength(0);
     });
+
+    it("a rolled-back order never leaves a persisted invoice_number behind", () => {
+      const input = baseOrderInput(customerId, {
+        items: [{ printType: null as unknown as string, width: 1, height: 1, unit: "Meter", areaSquareMeters: 1, ratePaise: 100, quantity: 1, totalPaise: 100 }],
+      });
+      expect(() => createOrder(db, input)).toThrow();
+      const invoiceNumbers = db.prepare("SELECT invoice_number FROM orders").all();
+      expect(invoiceNumbers).toHaveLength(0);
+    });
+  });
+
+  describe("PHASE 11 — invoice numbers", () => {
+    it("generates an invoice number derived from the order's own id", () => {
+      const order = createOrder(db, baseOrderInput(customerId));
+      expect(order.invoiceNumber).toBe(invoiceNumberForId(order.id));
+    });
+
+    it("produces a different, correctly-derived invoice number for each sequential order", () => {
+      const first = createOrder(db, baseOrderInput(customerId));
+      const second = createOrder(db, baseOrderInput(customerId));
+
+      expect(first.invoiceNumber).toBe(invoiceNumberForId(first.id));
+      expect(second.invoiceNumber).toBe(invoiceNumberForId(second.id));
+      expect(second.invoiceNumber).not.toBe(first.invoiceNumber);
+    });
+
+    it("persists the invoice number — a subsequent getOrder reflects it", () => {
+      const created = createOrder(db, baseOrderInput(customerId));
+      expect(getOrder(db, created.id).invoiceNumber).toBe(created.invoiceNumber);
+    });
+
+    it("invoice number is unchanged by updateOrderStatus", () => {
+      const created = createOrder(db, baseOrderInput(customerId));
+      updateOrderStatus(db, created.id, "Completed");
+      expect(getOrder(db, created.id).invoiceNumber).toBe(created.invoiceNumber);
+    });
+
+    it("the database rejects a duplicate invoice_number outright, independent of application code", () => {
+      const created = createOrder(db, baseOrderInput(customerId));
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO orders (
+               customer_id, customer_name, customer_phone, customer_address, status,
+               subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+               invoice_number, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+          )
+          .run(customerId, "Ramesh Kumar", "9876543210", "12 MG Road", "Pending", 50000, 0, 0, 18, 9000, 59000, created.invoiceNumber)
+      ).toThrow();
+    });
   });
 
   describe("PHASE 9 — dashboard aggregates", () => {
-    /** Bypasses createOrder (which always uses datetime('now')) so tests can control created_at precisely. */
+    /**
+     * Bypasses createOrder (which always uses datetime('now')) so tests
+     * can control created_at precisely. Still gives every row a real,
+     * unique invoice_number (required by the UNIQUE index migration 7
+     * added) by following the same insert-then-update-by-id pattern
+     * ordersRepository.createOrder itself uses.
+     */
     function insertOrderAt(createdAt: string, overrides: Partial<{ status: string; grandTotalPaise: number }> = {}) {
-      db.prepare(
-        `INSERT INTO orders (
-           customer_id, customer_name, customer_phone, customer_address, status,
-           subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
-           created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        customerId,
-        "Ramesh Kumar",
-        "9876543210",
-        "12 MG Road",
-        overrides.status ?? "Pending",
-        50000,
-        0,
-        0,
-        18,
-        9000,
-        overrides.grandTotalPaise ?? 59000,
-        createdAt,
-        createdAt
-      );
+      const result = db
+        .prepare(
+          `INSERT INTO orders (
+             customer_id, customer_name, customer_phone, customer_address, status,
+             subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+             invoice_number, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`
+        )
+        .run(
+          customerId,
+          "Ramesh Kumar",
+          "9876543210",
+          "12 MG Road",
+          overrides.status ?? "Pending",
+          50000,
+          0,
+          0,
+          18,
+          9000,
+          overrides.grandTotalPaise ?? 59000,
+          createdAt,
+          createdAt
+        );
+      const id = result.lastInsertRowid as number;
+      db.prepare("UPDATE orders SET invoice_number = ? WHERE id = ?").run(invoiceNumberForId(id), id);
     }
 
     describe("countOrders", () => {

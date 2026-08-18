@@ -25,6 +25,7 @@ const CUSTOMER: Customer = {
 
 const CREATED_ORDER: Order = {
   id: 42,
+  invoiceNumber: "INV-000042",
   customerId: 5,
   customerName: "Ramesh",
   customerPhone: "9998887770",

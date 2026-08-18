@@ -101,7 +101,7 @@ export function PrintInvoice() {
               </div>
               <div className="text-right">
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">INVOICE</h2>
-                <p className="text-sm text-gray-600">Order #: {order.id}</p>
+                <p className="text-sm text-gray-600">Invoice #: {order.invoiceNumber}</p>
                 <p className="text-sm text-gray-600">Date: {formatOrderDate(order.createdAt)}</p>
               </div>
             </div>
