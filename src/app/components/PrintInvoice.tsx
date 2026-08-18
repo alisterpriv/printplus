@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router";
 import { Button } from "./ui/button";
 import { Printer, ArrowLeft } from "lucide-react";
-import type { Order } from "../../types/ipc-contracts";
+import type { Order, BusinessSettings } from "../../types/ipc-contracts";
 
 /**
  * Renders the historical Order exactly as persisted (customer snapshot,
@@ -23,9 +23,13 @@ export function PrintInvoice() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [order, setOrder] = useState<Order | null>(null);
+  const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
+  // An invoice needs both the order and the current business identity to
+  // render meaningfully — if either fetch fails, the existing not-found
+  // state is used rather than rendering a half-populated invoice.
   useEffect(() => {
     const orderId = Number(id);
     if (!id || !Number.isInteger(orderId) || orderId <= 0) {
@@ -33,9 +37,11 @@ export function PrintInvoice() {
       setNotFound(true);
       return;
     }
-    window.api.orders
-      .get(orderId)
-      .then(setOrder)
+    Promise.all([window.api.orders.get(orderId), window.api.businessSettings.get()])
+      .then(([fetchedOrder, fetchedBusinessSettings]) => {
+        setOrder(fetchedOrder);
+        setBusinessSettings(fetchedBusinessSettings);
+      })
       .catch(() => setNotFound(true))
       .finally(() => setIsLoading(false));
   }, [id]);
@@ -52,7 +58,7 @@ export function PrintInvoice() {
     );
   }
 
-  if (notFound || !order) {
+  if (notFound || !order || !businessSettings) {
     return (
       <div className="p-8 text-center">
         <p className="text-gray-600">Invoice not found.</p>
@@ -92,12 +98,15 @@ export function PrintInvoice() {
           <div className="border-b-2 border-gray-300 pb-6 mb-6">
             <div className="flex justify-between items-start">
               <div>
-                <h1 className="text-4xl font-bold text-[#2563EB] mb-2">PrintPlus</h1>
-                <p className="text-sm text-gray-600">123 Main Street, City Center</p>
-                <p className="text-sm text-gray-600">Mumbai, Maharashtra 400001</p>
-                <p className="text-sm text-gray-600">Phone: +91 12345 67890</p>
-                <p className="text-sm text-gray-600">Email: contact@printplus.com</p>
-                <p className="text-sm text-gray-600 mt-1">GST: 27XXXXX1234X1Z5</p>
+                {businessSettings.businessName && (
+                  <h1 className="text-4xl font-bold text-[#2563EB] mb-2">{businessSettings.businessName}</h1>
+                )}
+                {businessSettings.address && <p className="text-sm text-gray-600">{businessSettings.address}</p>}
+                {businessSettings.phone && <p className="text-sm text-gray-600">Phone: {businessSettings.phone}</p>}
+                {businessSettings.email && <p className="text-sm text-gray-600">Email: {businessSettings.email}</p>}
+                {businessSettings.gstin && (
+                  <p className="text-sm text-gray-600 mt-1">GSTIN: {businessSettings.gstin}</p>
+                )}
               </div>
               <div className="text-right">
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">INVOICE</h2>
@@ -193,7 +202,11 @@ export function PrintInvoice() {
 
           {/* Footer */}
           <div className="border-t-2 border-gray-300 pt-6 text-center">
-            <p className="text-sm text-gray-600 mb-2">Thank you for choosing PrintPlus!</p>
+            <p className="text-sm text-gray-600 mb-2">
+              {businessSettings.businessName
+                ? `Thank you for choosing ${businessSettings.businessName}!`
+                : "Thank you for your business!"}
+            </p>
             <p className="text-xs text-gray-500">
               This is a computer-generated invoice and does not require a signature.
             </p>
