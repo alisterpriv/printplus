@@ -5,6 +5,7 @@ import { Input } from "./ui/input";
 import { Edit, Save, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Rate } from "../../types/ipc-contracts";
+import { getErrorMessage } from "../lib/getErrorMessage";
 
 export function RateSettings() {
   const [rates, setRates] = useState<Rate[]>([]);
@@ -16,7 +17,7 @@ export function RateSettings() {
     window.api.rates
       .list()
       .then(setRates)
-      .catch(() => toast.error("Failed to load rates"))
+      .catch((error) => toast.error(getErrorMessage(error, "Failed to load rates")))
       .finally(() => setIsLoading(false));
   }, []);
 
@@ -45,8 +46,8 @@ export function RateSettings() {
       setEditingId(null);
       setEditValue("");
       toast.success("Rate updated successfully");
-    } catch {
-      toast.error("Failed to update rate");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to update rate"));
     }
   };
 

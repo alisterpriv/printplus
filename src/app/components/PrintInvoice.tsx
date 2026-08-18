@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router";
 import { Button } from "./ui/button";
-import { Printer, Download, ArrowLeft } from "lucide-react";
+import { Printer, ArrowLeft } from "lucide-react";
 import type { Order } from "../../types/ipc-contracts";
 
 /**
@@ -74,13 +74,6 @@ export function PrintInvoice() {
             Back
           </Button>
           <div className="flex gap-3">
-            <Button
-              variant="outline"
-              className="border-gray-300"
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Download PDF
-            </Button>
             <Button
               onClick={handlePrint}
               className="bg-[#2563EB] hover:bg-blue-700"

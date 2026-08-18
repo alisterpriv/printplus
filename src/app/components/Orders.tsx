@@ -13,6 +13,7 @@ import {
 import { Search, Eye, Printer } from "lucide-react";
 import { toast } from "sonner";
 import type { Order, OrderStatus } from "../../types/ipc-contracts";
+import { getErrorMessage } from "../lib/getErrorMessage";
 
 const ORDER_STATUSES: OrderStatus[] = ["Pending", "Processing", "Completed"];
 
@@ -26,7 +27,7 @@ export function Orders() {
     window.api.orders
       .list()
       .then(setOrders)
-      .catch(() => toast.error("Failed to load orders"))
+      .catch((error) => toast.error(getErrorMessage(error, "Failed to load orders")))
       .finally(() => setIsLoading(false));
   }, []);
 
@@ -42,8 +43,8 @@ export function Orders() {
       await window.api.orders.updateStatus(order.id, status);
       setOrders(orders.map(o => (o.id === order.id ? { ...o, status } : o)));
       toast.success("Order status updated");
-    } catch {
-      toast.error("Failed to update order status");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to update order status"));
     }
   };
 

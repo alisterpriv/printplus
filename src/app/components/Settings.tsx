@@ -6,7 +6,6 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Switch } from "./ui/switch";
 import { Building2, Save } from "lucide-react";
-import { toast } from "sonner";
 
 export function Settings() {
   const [shopName, setShopName] = useState("PrintPlus");
@@ -17,10 +16,6 @@ export function Settings() {
   const [autoBackup, setAutoBackup] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [printAutoSave, setPrintAutoSave] = useState(false);
-
-  const handleSave = () => {
-    toast.success("Settings saved successfully");
-  };
 
   return (
     <div className="p-8">
@@ -208,7 +203,7 @@ export function Settings() {
 
         {/* Save Button */}
         <div className="flex justify-end">
-          <Button onClick={handleSave} className="bg-[#2563EB] hover:bg-blue-700">
+          <Button disabled title="Settings are not saved yet" className="bg-[#2563EB] hover:bg-blue-700">
             <Save className="w-4 h-4 mr-2" />
             Save Settings
           </Button>

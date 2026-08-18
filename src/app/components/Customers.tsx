@@ -13,6 +13,7 @@ import {
 import { Search, UserPlus, Mail, Phone, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import type { Customer } from "../../types/ipc-contracts";
+import { getErrorMessage } from "../lib/getErrorMessage";
 
 const EMPTY_FORM = { name: "", phone: "", email: "", address: "" };
 
@@ -31,7 +32,7 @@ export function Customers() {
     return window.api.customers
       .list()
       .then(setCustomers)
-      .catch(() => toast.error("Failed to load customers"))
+      .catch((error) => toast.error(getErrorMessage(error, "Failed to load customers")))
       .finally(() => setIsLoading(false));
   };
 
@@ -79,8 +80,10 @@ export function Customers() {
       }
       setIsDialogOpen(false);
       await loadCustomers();
-    } catch {
-      toast.error(editingCustomer ? "Failed to update customer" : "Failed to add customer");
+    } catch (error) {
+      toast.error(
+        getErrorMessage(error, editingCustomer ? "Failed to update customer" : "Failed to add customer")
+      );
     } finally {
       setIsSaving(false);
     }

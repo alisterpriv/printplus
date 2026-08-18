@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "./ui/dialog";
-import { Trash2, Plus, Printer, Save, FileDown, UserPlus } from "lucide-react";
+import { Trash2, Plus, Printer, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import {
   calculateAreaInSquareMeters,
@@ -21,6 +21,7 @@ import {
   type LengthUnit,
 } from "../../domain/pricing";
 import type { Rate, Customer } from "../../types/ipc-contracts";
+import { getErrorMessage } from "../lib/getErrorMessage";
 
 interface BillItem {
   id: string;
@@ -91,7 +92,7 @@ export function CreateBill() {
     window.api.rates
       .list()
       .then(setRates)
-      .catch(() => toast.error("Failed to load print rates"))
+      .catch((error) => toast.error(getErrorMessage(error, "Failed to load print rates")))
       .finally(() => setRatesLoading(false));
   }, []);
 
@@ -100,7 +101,7 @@ export function CreateBill() {
     return window.api.customers
       .list()
       .then(setCustomers)
-      .catch(() => toast.error("Failed to load customers"))
+      .catch((error) => toast.error(getErrorMessage(error, "Failed to load customers")))
       .finally(() => setCustomersLoading(false));
   };
 
@@ -121,8 +122,8 @@ export function CreateBill() {
       setIsAddCustomerOpen(false);
       setNewCustomer(EMPTY_NEW_CUSTOMER);
       toast.success("Customer added successfully");
-    } catch {
-      toast.error("Failed to add customer");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to add customer"));
     } finally {
       setIsSavingCustomer(false);
     }
@@ -228,8 +229,8 @@ export function CreateBill() {
         gstPercent: parseFloat(gst || "0"),
       });
       navigate(`/invoice/${order.id}`);
-    } catch {
-      toast.error("Failed to create order");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to create order"));
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -526,22 +527,6 @@ export function CreateBill() {
               >
                 <Printer className="w-4 h-4 mr-2" />
                 {isSubmittingOrder ? "Creating Order..." : "Print Invoice"}
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full border-gray-300 hover:bg-gray-50"
-                onClick={() => toast.success("Bill saved successfully")}
-              >
-                <Save className="w-4 h-4 mr-2" />
-                Save Bill
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full border-gray-300 hover:bg-gray-50"
-                onClick={() => toast.success("PDF generated successfully")}
-              >
-                <FileDown className="w-4 h-4 mr-2" />
-                Generate PDF
               </Button>
             </div>
           </Card>
