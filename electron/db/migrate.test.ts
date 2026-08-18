@@ -323,13 +323,13 @@ describe("the real, shipped migration list (v1-v5, dashboard indexes)", () => {
     db.close();
   });
 
-  it("records migration version 5", () => {
+  it("records migration version 5 among the applied set", () => {
     const db = createConnection(":memory:");
     runMigrations(db);
     const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
       version: number;
     }[];
-    expect(rows.map((v) => v.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(rows.map((v) => v.version)).toEqual(expect.arrayContaining([1, 2, 3, 4, 5]));
     db.close();
   });
 
@@ -338,12 +338,12 @@ describe("the real, shipped migration list (v1-v5, dashboard indexes)", () => {
     runMigrations(db, realMigrations.slice(0, 4));
     expect(indexNames(db)).toHaveLength(0);
 
-    runMigrations(db); // full, real list — should apply only the newly-pending migration 5
+    runMigrations(db); // full, real list — should apply only the newly-pending migration 5 (and any later ones)
 
     const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
       version: number;
     }[];
-    expect(rows.map((v) => v.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(rows.map((v) => v.version)).toEqual(expect.arrayContaining([1, 2, 3, 4, 5]));
     expect(indexNames(db).sort()).toEqual(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"]);
     db.close();
   });
@@ -377,6 +377,118 @@ describe("the real, shipped migration list (v1-v5, dashboard indexes)", () => {
     runMigrations(db);
     runMigrations(db);
     expect(indexNames(db).sort()).toEqual(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"]);
+    db.close();
+  });
+});
+
+describe("the real, shipped migration list (v1-v6, business_settings)", () => {
+  it("creates the business_settings table on a fresh database", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'business_settings'")
+      .all();
+    expect(tables).toHaveLength(1);
+    db.close();
+  });
+
+  it("seeds exactly one row on a fresh database", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const rows = db.prepare("SELECT * FROM business_settings").all();
+    expect(rows).toHaveLength(1);
+    db.close();
+  });
+
+  it("seeds the row with id = 1", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const row = db.prepare("SELECT id FROM business_settings").get() as { id: number };
+    expect(row.id).toBe(1);
+    db.close();
+  });
+
+  it("seeds business_name as an empty string, not fabricated data", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const row = db.prepare("SELECT business_name FROM business_settings").get() as { business_name: string };
+    expect(row.business_name).toBe("");
+    db.close();
+  });
+
+  it("seeds optional fields as NULL", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const row = db.prepare("SELECT address, phone, email, gstin FROM business_settings").get() as {
+      address: string | null;
+      phone: string | null;
+      email: string | null;
+      gstin: string | null;
+    };
+    expect(row.address).toBeNull();
+    expect(row.phone).toBeNull();
+    expect(row.email).toBeNull();
+    expect(row.gstin).toBeNull();
+    db.close();
+  });
+
+  it("records migration version 6 among the applied set", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((v) => v.version)).toEqual(expect.arrayContaining([1, 2, 3, 4, 5, 6]));
+    db.close();
+  });
+
+  it("applies cleanly to an existing v1-v5 database (simulating a real prior install) by applying only migration 6", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 5));
+
+    const before = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'business_settings'")
+      .all();
+    expect(before).toHaveLength(0);
+
+    runMigrations(db); // full, real list — should apply only the newly-pending migration 6
+
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((v) => v.version)).toEqual(expect.arrayContaining([1, 2, 3, 4, 5, 6]));
+    expect(db.prepare("SELECT * FROM business_settings").all()).toHaveLength(1);
+    db.close();
+  });
+
+  it("leaves existing customers/orders/rates/settings data untouched when adding business_settings", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 5));
+
+    db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))").run(
+      "phase10Test",
+      "still here"
+    );
+    db.prepare(
+      "INSERT INTO customers (name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("Ramesh", "123", null, "Road");
+
+    runMigrations(db); // applies migration 6 on top of existing real data
+
+    const settingRow = db.prepare("SELECT value FROM settings WHERE key = 'phase10Test'").get() as
+      | { value: string }
+      | undefined;
+    expect(settingRow?.value).toBe("still here");
+    expect(db.prepare("SELECT * FROM customers").all()).toHaveLength(1);
+    expect(db.prepare("SELECT * FROM rates").all()).toHaveLength(8);
+    db.close();
+  });
+
+  it("running the full list twice is safe and does not duplicate the business_settings row", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    runMigrations(db);
+    expect(db.prepare("SELECT * FROM business_settings").all()).toHaveLength(1);
     db.close();
   });
 });

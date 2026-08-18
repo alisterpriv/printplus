@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -6,16 +6,76 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Switch } from "./ui/switch";
 import { Building2, Save } from "lucide-react";
+import { toast } from "sonner";
+import type { BusinessSettingsInput } from "../../types/ipc-contracts";
+import { getErrorMessage } from "../lib/getErrorMessage";
+
+const EMPTY_BUSINESS_FORM = { businessName: "", address: "", phone: "", email: "", gstin: "" };
 
 export function Settings() {
-  const [shopName, setShopName] = useState("PrintPlus");
-  const [email, setEmail] = useState("contact@printplus.com");
-  const [phone, setPhone] = useState("+91 98500 57887");
-  const [address, setAddress] = useState("123 Main Street, City Center, Mumbai, Maharashtra 400001");
-  const [gstNumber, setGstNumber] = useState("27XXXXX1234X1Z5");
+  const [businessForm, setBusinessForm] = useState(EMPTY_BUSINESS_FORM);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+
   const [autoBackup, setAutoBackup] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [printAutoSave, setPrintAutoSave] = useState(false);
+
+  useEffect(() => {
+    window.api.businessSettings
+      .get()
+      .then((result) => {
+        setBusinessForm({
+          businessName: result.businessName,
+          address: result.address ?? "",
+          phone: result.phone ?? "",
+          email: result.email ?? "",
+          gstin: result.gstin ?? "",
+        });
+        setLoadError(null);
+      })
+      .catch((error) => {
+        const message = getErrorMessage(error, "Failed to load business information");
+        setLoadError(message);
+        toast.error(message);
+      })
+      .finally(() => setIsLoading(false));
+  }, []);
+
+  const handleSaveBusinessInfo = async () => {
+    if (!businessForm.businessName.trim()) {
+      setNameError("Business name is required");
+      return;
+    }
+    setNameError(null);
+
+    const input: BusinessSettingsInput = {
+      businessName: businessForm.businessName,
+      address: businessForm.address,
+      phone: businessForm.phone,
+      email: businessForm.email,
+      gstin: businessForm.gstin,
+    };
+
+    setIsSaving(true);
+    try {
+      const updated = await window.api.businessSettings.update(input);
+      setBusinessForm({
+        businessName: updated.businessName,
+        address: updated.address ?? "",
+        phone: updated.phone ?? "",
+        email: updated.email ?? "",
+        gstin: updated.gstin ?? "",
+      });
+      toast.success("Business information saved");
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to save business information"));
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className="p-8">
@@ -38,59 +98,69 @@ export function Settings() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="shopName">Shop Name</Label>
-              <Input
-                id="shopName"
-                value={shopName}
-                onChange={(e) => setShopName(e.target.value)}
-                className="mt-1"
-              />
-            </div>
+          {isLoading ? (
+            <p className="text-gray-500">Loading business information...</p>
+          ) : loadError ? (
+            <p className="text-red-600">{loadError}</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="shopName">Business Name *</Label>
+                <Input
+                  id="shopName"
+                  value={businessForm.businessName}
+                  onChange={(e) => {
+                    setBusinessForm({ ...businessForm, businessName: e.target.value });
+                    if (nameError) setNameError(null);
+                  }}
+                  className="mt-1"
+                />
+                {nameError && <p className="text-sm text-red-600 mt-1">{nameError}</p>}
+              </div>
 
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1"
-              />
-            </div>
+              <div>
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={businessForm.email}
+                  onChange={(e) => setBusinessForm({ ...businessForm, email: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
 
-            <div>
-              <Label htmlFor="phone">Phone Number</Label>
-              <Input
-                id="phone"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="mt-1"
-              />
-            </div>
+              <div>
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input
+                  id="phone"
+                  value={businessForm.phone}
+                  onChange={(e) => setBusinessForm({ ...businessForm, phone: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
 
-            <div>
-              <Label htmlFor="gstNumber">GST Number</Label>
-              <Input
-                id="gstNumber"
-                value={gstNumber}
-                onChange={(e) => setGstNumber(e.target.value)}
-                className="mt-1"
-              />
-            </div>
+              <div>
+                <Label htmlFor="gstNumber">GST Number</Label>
+                <Input
+                  id="gstNumber"
+                  value={businessForm.gstin}
+                  onChange={(e) => setBusinessForm({ ...businessForm, gstin: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
 
-            <div className="md:col-span-2">
-              <Label htmlFor="address">Business Address</Label>
-              <Textarea
-                id="address"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className="mt-1"
-                rows={3}
-              />
+              <div className="md:col-span-2">
+                <Label htmlFor="address">Business Address</Label>
+                <Textarea
+                  id="address"
+                  value={businessForm.address}
+                  onChange={(e) => setBusinessForm({ ...businessForm, address: e.target.value })}
+                  className="mt-1"
+                  rows={3}
+                />
+              </div>
             </div>
-          </div>
+          )}
         </Card>
 
         {/* Invoice Settings */}
@@ -203,9 +273,13 @@ export function Settings() {
 
         {/* Save Button */}
         <div className="flex justify-end">
-          <Button disabled title="Settings are not saved yet" className="bg-[#2563EB] hover:bg-blue-700">
+          <Button
+            onClick={handleSaveBusinessInfo}
+            disabled={isSaving || isLoading}
+            className="bg-[#2563EB] hover:bg-blue-700"
+          >
             <Save className="w-4 h-4 mr-2" />
-            Save Settings
+            {isSaving ? "Saving..." : "Save Settings"}
           </Button>
         </div>
       </div>

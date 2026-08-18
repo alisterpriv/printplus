@@ -141,4 +141,32 @@ export const migrations: Migration[] = [
       db.exec(`CREATE INDEX idx_order_items_order_id ON order_items(order_id)`);
     },
   },
+  {
+    version: 6,
+    name: "create_business_settings",
+    up: (db) => {
+      // Single-row table: id is pinned to 1 by CHECK, and the repository
+      // never exposes insert/delete, so this is the only row that will
+      // ever exist. business_name starts as "" (not a fabricated shop
+      // name) — same reasoning as migration 3's empty customers table:
+      // inventing realistic-looking fake business data would misrepresent
+      // a real shop's identity on its own invoices.
+      db.exec(`
+        CREATE TABLE business_settings (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          business_name TEXT NOT NULL,
+          address TEXT,
+          phone TEXT,
+          email TEXT,
+          gstin TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      db.exec(`
+        INSERT INTO business_settings (id, business_name, address, phone, email, gstin, created_at, updated_at)
+        VALUES (1, '', NULL, NULL, NULL, NULL, datetime('now'), datetime('now'))
+      `);
+    },
+  },
 ];

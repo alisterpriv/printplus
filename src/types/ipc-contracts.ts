@@ -124,12 +124,36 @@ export interface DashboardApi {
   getSummary(): Promise<DashboardSummary>;
 }
 
+export interface BusinessSettings {
+  businessName: string;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  gstin: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BusinessSettingsInput {
+  businessName: string;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  gstin: string | null;
+}
+
+export interface BusinessSettingsApi {
+  get(): Promise<BusinessSettings>;
+  update(input: BusinessSettingsInput): Promise<BusinessSettings>;
+}
+
 export interface PrintPlusApi {
   settings: SettingsApi;
   rates: RatesApi;
   customers: CustomersApi;
   orders: OrdersApi;
   dashboard: DashboardApi;
+  businessSettings: BusinessSettingsApi;
 }
 
 declare global {
