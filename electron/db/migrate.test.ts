@@ -239,13 +239,13 @@ describe("the real, shipped migration list (v1-v4, orders)", () => {
     db.close();
   });
 
-  it("records all four migration versions", () => {
+  it("records migration versions 1 through 4 among the applied set", () => {
     const db = createConnection(":memory:");
     runMigrations(db);
     const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
       version: number;
     }[];
-    expect(rows.map((r) => r.version)).toEqual([1, 2, 3, 4]);
+    expect(rows.map((r) => r.version)).toEqual(expect.arrayContaining([1, 2, 3, 4]));
     db.close();
   });
 
@@ -266,12 +266,12 @@ describe("the real, shipped migration list (v1-v4, orders)", () => {
       .all();
     expect(before).toHaveLength(0);
 
-    runMigrations(db); // full, real list — should apply only the newly-pending migration 4
+    runMigrations(db); // full, real list — applies migration 4 (and any later ones) on top of 1-3
 
     const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
       version: number;
     }[];
-    expect(rows.map((r) => r.version)).toEqual([1, 2, 3, 4]);
+    expect(rows.map((r) => r.version)).toEqual(expect.arrayContaining([1, 2, 3, 4]));
     db.close();
   });
 
@@ -303,6 +303,80 @@ describe("the real, shipped migration list (v1-v4, orders)", () => {
     runMigrations(db);
     expect(db.prepare("SELECT * FROM orders").all()).toHaveLength(0);
     expect(db.prepare("SELECT * FROM rates").all()).toHaveLength(8);
+    db.close();
+  });
+});
+
+describe("the real, shipped migration list (v1-v5, dashboard indexes)", () => {
+  function indexNames(db: DatabaseSync): string[] {
+    return (
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'").all() as {
+        name: string;
+      }[]
+    ).map((row) => row.name);
+  }
+
+  it("creates all three dashboard indexes on a fresh database", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    expect(indexNames(db).sort()).toEqual(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"]);
+    db.close();
+  });
+
+  it("records migration version 5", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((v) => v.version)).toEqual([1, 2, 3, 4, 5]);
+    db.close();
+  });
+
+  it("applies cleanly to an existing v1-v4 database (simulating a real prior install) by applying only migration 5", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 4));
+    expect(indexNames(db)).toHaveLength(0);
+
+    runMigrations(db); // full, real list — should apply only the newly-pending migration 5
+
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((v) => v.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(indexNames(db).sort()).toEqual(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"]);
+    db.close();
+  });
+
+  it("leaves existing orders/order_items/customers/rates data untouched when adding the indexes", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 4));
+
+    db.prepare(
+      "INSERT INTO customers (name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("Ramesh", "123", null, "Road");
+    const customerId = db.prepare("SELECT id FROM customers WHERE name = 'Ramesh'").get() as { id: number };
+    db.prepare(
+      `INSERT INTO orders (
+         customer_id, customer_name, customer_phone, customer_address, status,
+         subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+    ).run(customerId.id, "Ramesh", "123", "Road", "Pending", 5000, 0, 0, 18, 900, 5900);
+
+    runMigrations(db); // applies migration 5 on top of existing real data
+
+    expect(db.prepare("SELECT * FROM customers").all()).toHaveLength(1);
+    expect(db.prepare("SELECT * FROM orders").all()).toHaveLength(1);
+    expect(db.prepare("SELECT * FROM rates").all()).toHaveLength(8);
+    db.close();
+  });
+
+  it("running the full list twice is safe and does not duplicate indexes", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    runMigrations(db);
+    expect(indexNames(db).sort()).toEqual(["idx_order_items_order_id", "idx_orders_created_at", "idx_orders_status"]);
     db.close();
   });
 });

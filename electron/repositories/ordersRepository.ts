@@ -223,3 +223,105 @@ export function updateOrderStatus(db: DatabaseSync, id: number, status: string):
     throw new OrderNotFoundError(`No order found with id ${id}`);
   }
 }
+
+/**
+ * PHASE 9 — a half-open UTC range: created_at >= startUtc AND created_at
+ * < endUtc. Both bounds must already be in the same "YYYY-MM-DD HH:MM:SS"
+ * UTC-naive string format orders.created_at is stored in — computing that
+ * (e.g. converting the machine's local "today" into this format) is the
+ * caller's job, not this repository's; see dashboardService.ts.
+ */
+export interface DateRange {
+  startUtc: string;
+  endUtc: string;
+}
+
+export function countOrders(db: DatabaseSync): number {
+  const row = db.prepare("SELECT COUNT(*) as count FROM orders").get() as { count: number };
+  return row.count;
+}
+
+export function countOrdersByStatus(db: DatabaseSync, status: string): number {
+  const row = db.prepare("SELECT COUNT(*) as count FROM orders WHERE status = ?").get(status) as {
+    count: number;
+  };
+  return row.count;
+}
+
+export function countOrdersInRange(db: DatabaseSync, range: DateRange): number {
+  const row = db
+    .prepare("SELECT COUNT(*) as count FROM orders WHERE created_at >= ? AND created_at < ?")
+    .get(range.startUtc, range.endUtc) as { count: number };
+  return row.count;
+}
+
+/**
+ * Sums grand_total_paise directly in SQL — an exact integer sum, never a
+ * rupee-float sum in TypeScript. COALESCE guards the zero-orders case,
+ * where SQLite's SUM() over no rows returns NULL rather than 0.
+ */
+export function sumGrandTotalPaise(db: DatabaseSync, range: DateRange): number {
+  const row = db
+    .prepare("SELECT COALESCE(SUM(grand_total_paise), 0) as total FROM orders WHERE created_at >= ? AND created_at < ?")
+    .get(range.startUtc, range.endUtc) as { total: number };
+  return row.total;
+}
+
+/**
+ * A lightweight summary row — deliberately NOT the full Order shape, and
+ * deliberately does not load order_items, so a dashboard "recent orders"
+ * list never pays the per-order item-fetch cost listOrders/getOrder do.
+ * Money stays as paise here; converting to rupees is dashboardService's
+ * job (paise -> rupees happens exactly once, at the service boundary).
+ */
+export interface RecentOrderSummary {
+  id: number;
+  customerName: string;
+  status: string;
+  grandTotalPaise: number;
+  createdAt: string;
+}
+
+export function getRecentOrders(db: DatabaseSync, limit: number): RecentOrderSummary[] {
+  const rows = db
+    .prepare("SELECT id, customer_name, status, grand_total_paise, created_at FROM orders ORDER BY id DESC LIMIT ?")
+    .all(limit) as unknown as {
+    id: number;
+    customer_name: string;
+    status: string;
+    grand_total_paise: number;
+    created_at: string;
+  }[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    customerName: row.customer_name,
+    status: row.status,
+    grandTotalPaise: row.grand_total_paise,
+    createdAt: row.created_at,
+  }));
+}
+
+export interface PrintTypeUsage {
+  printType: string;
+  totalQuantity: number;
+}
+
+/**
+ * "Most used" = highest total quantity across order_items, grouped by the
+ * raw print_type text (order_items has no FK to rates — see migration 4 —
+ * so this counts every historical item exactly as it was billed).
+ */
+export function getTopPrintTypes(db: DatabaseSync, limit: number): PrintTypeUsage[] {
+  const rows = db
+    .prepare(
+      `SELECT print_type, SUM(quantity) as total_quantity
+       FROM order_items
+       GROUP BY print_type
+       ORDER BY total_quantity DESC
+       LIMIT ?`
+    )
+    .all(limit) as unknown as { print_type: string; total_quantity: number }[];
+
+  return rows.map((row) => ({ printType: row.print_type, totalQuantity: row.total_quantity }));
+}

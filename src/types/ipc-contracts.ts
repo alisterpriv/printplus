@@ -101,11 +101,35 @@ export interface OrdersApi {
   updateStatus(id: number, status: OrderStatus): Promise<void>;
 }
 
+export interface DashboardRecentOrder {
+  id: number;
+  customerName: string;
+  status: OrderStatus;
+  grandTotal: number;
+  createdAt: string;
+}
+
+export interface DashboardSummary {
+  todaysRevenue: number;
+  todaysOrders: number;
+  totalOrders: number;
+  pendingOrders: number;
+  completedOrders: number;
+  totalCustomers: number;
+  recentOrders: DashboardRecentOrder[];
+  mostUsedPrintType: string | null;
+}
+
+export interface DashboardApi {
+  getSummary(): Promise<DashboardSummary>;
+}
+
 export interface PrintPlusApi {
   settings: SettingsApi;
   rates: RatesApi;
   customers: CustomersApi;
   orders: OrdersApi;
+  dashboard: DashboardApi;
 }
 
 declare global {

@@ -7,6 +7,7 @@ import {
   createCustomer,
   updateCustomer,
   getCustomerById,
+  countCustomers,
   CustomerNotFoundError,
 } from "./customersRepository";
 
@@ -98,5 +99,18 @@ describe("customersRepository", () => {
 
   it("getCustomerById throws CustomerNotFoundError for a nonexistent id", () => {
     expect(() => getCustomerById(db, 999999)).toThrow(CustomerNotFoundError);
+  });
+
+  describe("countCustomers", () => {
+    it("returns 0 on a fresh database", () => {
+      expect(countCustomers(db)).toBe(0);
+    });
+
+    it("returns the exact count after several creates", () => {
+      createCustomer(db, { name: "First", phone: null, email: null, address: null });
+      createCustomer(db, { name: "Second", phone: null, email: null, address: null });
+      createCustomer(db, { name: "Third", phone: null, email: null, address: null });
+      expect(countCustomers(db)).toBe(3);
+    });
   });
 });

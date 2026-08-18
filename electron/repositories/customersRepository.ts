@@ -71,6 +71,12 @@ export function createCustomer(db: DatabaseSync, input: CustomerInput): Customer
   return toCustomer(row);
 }
 
+/** PHASE 9 — an exact SQL count, not customers.length after a full listCustomers() fetch. */
+export function countCustomers(db: DatabaseSync): number {
+  const row = db.prepare("SELECT COUNT(*) as count FROM customers").get() as { count: number };
+  return row.count;
+}
+
 export function updateCustomer(db: DatabaseSync, id: number, input: CustomerInput): void {
   const result = db
     .prepare(

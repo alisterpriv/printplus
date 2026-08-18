@@ -127,4 +127,18 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: "add_dashboard_indexes",
+    up: (db) => {
+      // Purely additive — no data change, safe on a database that already
+      // contains real orders/order_items. Added for Phase 9's dashboard
+      // aggregate queries (status counts, date-range sums, recent-order
+      // listing, per-order item lookups), which would otherwise be full
+      // table scans.
+      db.exec(`CREATE INDEX idx_orders_status ON orders(status)`);
+      db.exec(`CREATE INDEX idx_orders_created_at ON orders(created_at)`);
+      db.exec(`CREATE INDEX idx_order_items_order_id ON order_items(order_id)`);
+    },
+  },
 ];
