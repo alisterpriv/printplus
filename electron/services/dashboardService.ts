@@ -4,6 +4,7 @@ import {
   countOrdersByStatus,
   countOrdersInRange,
   sumGrandTotalPaise,
+  sumOutstandingBalancePaise,
   getRecentOrders,
   getTopPrintTypes,
   type DateRange,
@@ -30,6 +31,7 @@ export interface DashboardSummary {
   totalCustomers: number;
   recentOrders: DashboardRecentOrder[];
   mostUsedPrintType: string | null;
+  outstandingAmount: number;
 }
 
 function paiseToRupees(paise: number): number {
@@ -83,6 +85,18 @@ export function getTodayRangeUtc(now: Date = new Date()): DateRange {
  * that ambiguity is unacceptable for a number a shop owner makes
  * decisions from.
  */
+/**
+ * PHASE 15 — outstandingAmount is the all-time total owed across every
+ * order (not scoped to "today"), computed via a single SQL aggregate
+ * (sumOutstandingBalancePaise). Deliberately does NOT add a "Today's
+ * Collected" metric: this app records only a cumulative amount_paid_paise
+ * per order, with no payment timestamp, so "money actually collected
+ * today" cannot be honestly computed — only "amount currently paid
+ * against orders created today" could be, which answers a different,
+ * less useful question and would be misleading under a "Today's
+ * Collected" label. todaysRevenue's existing meaning (booked value, not
+ * collected cash) is unchanged by this addition.
+ */
 export function getDashboardSummary(db: DatabaseSync, now: Date = new Date()): DashboardSummary {
   const todayRange = getTodayRangeUtc(now);
 
@@ -105,5 +119,6 @@ export function getDashboardSummary(db: DatabaseSync, now: Date = new Date()): D
     totalCustomers: countCustomers(db),
     recentOrders,
     mostUsedPrintType: topPrintTypes[0]?.printType ?? null,
+    outstandingAmount: paiseToRupees(sumOutstandingBalancePaise(db)),
   };
 }

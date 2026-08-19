@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router";
-import { PrintInvoice } from "./PrintInvoice";
+import { PrintInvoice, validatePaymentAmount } from "./PrintInvoice";
 import type { BusinessSettings, Order, PrintPlusApi } from "../../types/ipc-contracts";
 
 // The historical snapshot this test renders deliberately differs from
@@ -35,6 +36,9 @@ const PERSISTED_ORDER: Order = {
   gstPercent: 18,
   gstAmount: 59.4,
   grandTotal: 389.4,
+  amountPaid: 0,
+  balanceDue: 389.4,
+  paymentStatus: "Unpaid",
   createdAt: "2026-01-01 00:00:00",
   updatedAt: "2026-01-01 00:00:00",
 };
@@ -98,7 +102,9 @@ describe("PrintInvoice", () => {
     expect(await screen.findByText("Ramesh (as of order date)")).toBeTruthy();
     expect(screen.getByText("Old MG Road")).toBeTruthy();
     expect(screen.getByText(/₹55/)).toBeTruthy();
-    expect(screen.getByText(/₹389\.40/)).toBeTruthy();
+    // PERSISTED_ORDER is unpaid, so ₹389.40 legitimately appears twice
+    // (Grand Total and Balance Due) — scope to Grand Total specifically.
+    expect(screen.getByText("Grand Total:").closest("div")?.textContent).toContain("₹389.40");
 
     expect(getOrder).toHaveBeenCalledWith(42);
     // No customers/rates lookups exist to blend in current data — this
@@ -242,7 +248,7 @@ describe("PrintInvoice", () => {
 
       expect(screen.getByText("Ramesh (as of order date)")).toBeTruthy();
       expect(screen.getByText("Old MG Road")).toBeTruthy();
-      expect(screen.getByText(/₹389\.40/)).toBeTruthy();
+      expect(screen.getByText("Grand Total:").closest("div")?.textContent).toContain("₹389.40");
       expect(screen.getByText(/INV-000042/)).toBeTruthy();
     });
 
@@ -263,6 +269,205 @@ describe("PrintInvoice", () => {
       // Order data must not leak through on a failed combined load.
       expect(screen.queryByText("Ramesh (as of order date)")).toBeNull();
       expect(screen.queryByText(/INV-000042/)).toBeNull();
+    });
+  });
+
+  describe("PHASE 15 — payment tracking", () => {
+    const PARTIAL_ORDER: Order = { ...PERSISTED_ORDER, amountPaid: 100, balanceDue: 289.4, paymentStatus: "Partial" };
+    const PAID_ORDER: Order = { ...PERSISTED_ORDER, amountPaid: 389.4, balanceDue: 0, paymentStatus: "Paid" };
+
+    it("shows Paid ₹0.00, full balance due, and Unpaid status for a brand-new order", async () => {
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PERSISTED_ORDER) });
+      await screen.findByText("Ramesh (as of order date)");
+
+      expect(screen.getByText("Paid:").closest("div")?.textContent).toContain("₹0.00");
+      expect(screen.getByText("Balance Due:").closest("div")?.textContent).toContain("₹389.40");
+      expect(screen.getByText("Unpaid")).toBeTruthy();
+    });
+
+    it("shows the correct amounts and Partial status for a partially-paid order", async () => {
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER) });
+      await screen.findByText("Ramesh (as of order date)");
+
+      expect(screen.getByText("Paid:").closest("div")?.textContent).toContain("₹100.00");
+      expect(screen.getByText("Balance Due:").closest("div")?.textContent).toContain("₹289.40");
+      expect(screen.getByText("Partial")).toBeTruthy();
+    });
+
+    it("shows Paid in full, ₹0.00 balance, and Paid status for a fully-paid order", async () => {
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PAID_ORDER) });
+      await screen.findByText("Ramesh (as of order date)");
+
+      expect(screen.getByText("Paid:").closest("div")?.textContent).toContain("₹389.40");
+      expect(screen.getByText("Balance Due:").closest("div")?.textContent).toContain("₹0.00");
+      expect(screen.getByText("Paid")).toBeTruthy(); // the payment status badge
+    });
+
+    it("disables the Record Payment action for an already fully-paid order", async () => {
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PAID_ORDER) });
+      await screen.findByText("Ramesh (as of order date)");
+      expect(screen.getByRole("button", { name: /record payment/i })).toHaveProperty("disabled", true);
+    });
+
+    it("opens the payment dialog pre-filled with the current balance due", async () => {
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER) });
+      await screen.findByText("Ramesh (as of order date)");
+
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+
+      expect(await screen.findByText("Already Paid")).toBeTruthy();
+      const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
+      expect(amountInput.value).toBe("289.40");
+    });
+
+    it("shows Total/Already Paid/Balance Due summary inside the dialog", async () => {
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER) });
+      await screen.findByText("Ramesh (as of order date)");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+
+      expect(await screen.findByText("Total")).toBeTruthy();
+      expect(screen.getByText("Already Paid")).toBeTruthy();
+      // Dialog and Totals section both render "Balance Due" — assert at least one shows the right amount.
+      expect(screen.getAllByText("₹289.40").length).toBeGreaterThan(0);
+    });
+
+    it("rejects an empty payment amount", async () => {
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER) });
+      await screen.findByText("Ramesh (as of order date)");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+
+      const amountInput = await screen.findByLabelText("Amount");
+      await user.clear(amountInput);
+      await user.click(screen.getByRole("button", { name: /^record payment$/i }));
+
+      expect(await screen.findByText(/please enter a payment amount/i)).toBeTruthy();
+    });
+
+    it("rejects a zero payment amount", async () => {
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER) });
+      await screen.findByText("Ramesh (as of order date)");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+
+      const amountInput = await screen.findByLabelText("Amount");
+      await user.clear(amountInput);
+      await user.type(amountInput, "0");
+      await user.click(screen.getByRole("button", { name: /^record payment$/i }));
+
+      expect(await screen.findByText(/must be greater than zero/i)).toBeTruthy();
+    });
+
+    it("rejects a negative payment amount", async () => {
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER) });
+      await screen.findByText("Ramesh (as of order date)");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+
+      const amountInput = await screen.findByLabelText("Amount");
+      await user.clear(amountInput);
+      await user.type(amountInput, "-50");
+      await user.click(screen.getByRole("button", { name: /^record payment$/i }));
+
+      expect(await screen.findByText(/must be greater than zero/i)).toBeTruthy();
+    });
+
+    // A native <input type="number"> never actually exposes a malformed,
+    // non-empty string to onChange (browsers/jsdom sanitize keystrokes as
+    // they're typed — "12.3.4" lands as "12.34"), so this branch of
+    // validatePaymentAmount can't be triggered through the rendered form.
+    // It's still real defense-in-depth (e.g. against a non-keyboard input
+    // source), verified directly here instead.
+    it("validatePaymentAmount treats a non-finite parse as an invalid amount, not silently as zero", () => {
+      expect(validatePaymentAmount("not-a-number", 289.4)).toMatch(/please enter a valid payment amount/i);
+      expect(validatePaymentAmount("NaN", 289.4)).toMatch(/please enter a valid payment amount/i);
+    });
+
+    it("rejects an amount exceeding the current balance, naming the balance in the message", async () => {
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER) }); // balance 289.40
+      await screen.findByText("Ramesh (as of order date)");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+
+      const amountInput = await screen.findByLabelText("Amount");
+      await user.clear(amountInput);
+      await user.type(amountInput, "500");
+      await user.click(screen.getByRole("button", { name: /^record payment$/i }));
+
+      expect(await screen.findByText(/cannot exceed the balance due of ₹289\.40/i)).toBeTruthy();
+    });
+
+    it("shows a loading state and disables actions while the payment is being recorded", async () => {
+      let resolveRecordPayment: (order: Order) => void;
+      const recordPayment = vi.fn(
+        () =>
+          new Promise<Order>((resolve) => {
+            resolveRecordPayment = resolve;
+          })
+      );
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER), recordPayment });
+      await screen.findByText("Ramesh (as of order date)");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+      await screen.findByLabelText("Amount");
+
+      await user.click(screen.getByRole("button", { name: /^record payment$/i }));
+
+      expect(await screen.findByRole("button", { name: /recording/i })).toHaveProperty("disabled", true);
+      expect(screen.getByRole("button", { name: /cancel/i })).toHaveProperty("disabled", true);
+
+      resolveRecordPayment!({ ...PARTIAL_ORDER, amountPaid: 389.4, balanceDue: 0, paymentStatus: "Paid" });
+      await screen.findByRole("button", { name: /^record payment$/i }); // dialog closes, action button reverts
+    });
+
+    it("on success: updates the displayed order and closes the dialog", async () => {
+      const updatedOrder: Order = { ...PARTIAL_ORDER, amountPaid: 389.4, balanceDue: 0, paymentStatus: "Paid" };
+      const recordPayment = vi.fn().mockResolvedValue(updatedOrder);
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER), recordPayment });
+      await screen.findByText("Ramesh (as of order date)");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+      await screen.findByLabelText("Amount");
+
+      await user.click(screen.getByRole("button", { name: /^record payment$/i }));
+
+      await screen.findByText("Paid"); // the payment status badge, after re-render
+      expect(recordPayment).toHaveBeenCalledWith(42, 289.4);
+      expect(screen.queryByLabelText("Amount")).toBeNull(); // dialog closed
+      expect(screen.getByText("Balance Due:").closest("div")?.textContent).toContain("₹0.00");
+    });
+
+    it("on failure: shows a safe error and preserves the currently-displayed payment state", async () => {
+      const recordPayment = vi.fn().mockRejectedValue(new Error("Payment amount cannot exceed the balance due of ₹289.40."));
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER), recordPayment });
+      await screen.findByText("Ramesh (as of order date)");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+      await screen.findByLabelText("Amount");
+
+      await user.click(screen.getByRole("button", { name: /^record payment$/i }));
+
+      // The dialog stays open and the underlying order display is untouched.
+      expect(await screen.findByLabelText("Amount")).toBeTruthy();
+      expect(screen.getByText("Paid:").closest("div")?.textContent).toContain("₹100.00"); // unchanged
+    });
+
+    it("cancelling the dialog discards the entered amount without recording anything", async () => {
+      const recordPayment = vi.fn();
+      const user = userEvent.setup();
+      renderInvoiceForOrder42({ get: vi.fn().mockResolvedValue(PARTIAL_ORDER), recordPayment });
+      await screen.findByText("Ramesh (as of order date)");
+      await user.click(screen.getByRole("button", { name: /record payment/i }));
+
+      const amountInput = await screen.findByLabelText("Amount");
+      await user.clear(amountInput);
+      await user.type(amountInput, "50");
+      await user.click(screen.getByRole("button", { name: /cancel/i }));
+
+      expect(screen.queryByLabelText("Amount")).toBeNull();
+      expect(recordPayment).not.toHaveBeenCalled();
     });
   });
 });

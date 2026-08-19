@@ -38,6 +38,9 @@ const CREATED_ORDER: Order = {
   gstPercent: 18,
   gstAmount: 108,
   grandTotal: 708,
+  amountPaid: 0,
+  balanceDue: 708,
+  paymentStatus: "Unpaid",
   createdAt: "2026-01-01 00:00:00",
   updatedAt: "2026-01-01 00:00:00",
 };

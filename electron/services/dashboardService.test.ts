@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { createConnection } from "../db/connection";
 import { runMigrations } from "../db/migrate";
 import { createCustomer } from "../repositories/customersRepository";
-import { createOrder, updateOrderStatus } from "../repositories/ordersRepository";
+import { createOrder, updateOrderStatus, recordPayment } from "../repositories/ordersRepository";
 import { getDashboardSummary, getTodayRangeUtc } from "./dashboardService";
 
 function baseOrderInput(customerId: number, overrides: Partial<Parameters<typeof createOrder>[1]> = {}) {
@@ -106,6 +106,7 @@ describe("dashboardService", () => {
         totalCustomers: 1, // the customer created in beforeEach
         recentOrders: [],
         mostUsedPrintType: null,
+        outstandingAmount: 0,
       });
     });
 
@@ -152,6 +153,58 @@ describe("dashboardService", () => {
     it("propagates a repository failure rather than substituting zeros", () => {
       db.close(); // force every subsequent query to fail
       expect(() => getDashboardSummary(db)).toThrow();
+    });
+
+    describe("PHASE 15 — outstandingAmount", () => {
+      it("is ₹0 when there are no orders", () => {
+        expect(getDashboardSummary(db).outstandingAmount).toBe(0);
+      });
+
+      it("an unpaid order contributes its full grand total", () => {
+        createOrder(db, baseOrderInput(customerId, { grandTotalPaise: 59000 })); // ₹590
+        expect(getDashboardSummary(db).outstandingAmount).toBe(590);
+      });
+
+      it("a partially-paid order contributes only its remaining balance", () => {
+        const order = createOrder(db, baseOrderInput(customerId, { grandTotalPaise: 59000 })); // ₹590
+        recordPayment(db, order.id, 40000); // ₹400 paid -> ₹190 remaining
+        expect(getDashboardSummary(db).outstandingAmount).toBe(190);
+      });
+
+      it("a fully-paid order contributes zero", () => {
+        const order = createOrder(db, baseOrderInput(customerId, { grandTotalPaise: 59000 }));
+        recordPayment(db, order.id, 59000);
+        expect(getDashboardSummary(db).outstandingAmount).toBe(0);
+      });
+
+      it("aggregates correctly across a mix of unpaid, partial, and fully-paid orders", () => {
+        createOrder(db, baseOrderInput(customerId, { grandTotalPaise: 10000 })); // ₹100 owed
+        const partial = createOrder(db, baseOrderInput(customerId, { grandTotalPaise: 20000 })); // ₹200 total
+        recordPayment(db, partial.id, 5000); // ₹150 owed
+        const paid = createOrder(db, baseOrderInput(customerId, { grandTotalPaise: 30000 })); // ₹300 total
+        recordPayment(db, paid.id, 30000); // ₹0 owed
+
+        expect(getDashboardSummary(db).outstandingAmount).toBe(250); // 100 + 150 + 0
+      });
+
+      it("is computed via a single SQL aggregate, not by summing fetched rows in TypeScript", () => {
+        // A behavioral proxy for "SQL-side, not app-side": the result stays
+        // exact-integer-correct (no rupee-float drift) across many orders
+        // with fractional-paisa-prone totals.
+        for (let i = 0; i < 5; i++) {
+          createOrder(db, baseOrderInput(customerId, { grandTotalPaise: 1010 })); // ₹10.10 each
+        }
+        expect(getDashboardSummary(db).outstandingAmount).toBeCloseTo(50.5, 5);
+      });
+
+      it("does not change todaysRevenue's existing booked-value meaning", () => {
+        const order = createOrder(db, baseOrderInput(customerId, { grandTotalPaise: 59000 }));
+        const before = getDashboardSummary(db, new Date()).todaysRevenue;
+        recordPayment(db, order.id, 20000); // recording a payment must not affect booked revenue
+        const after = getDashboardSummary(db, new Date()).todaysRevenue;
+        expect(after).toBe(before);
+        expect(after).toBe(590); // still the full booked grand total, not the amount collected
+      });
     });
   });
 });

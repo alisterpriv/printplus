@@ -6,11 +6,12 @@ import {
   getOrder as getOrderService,
   createOrder as createOrderService,
   updateOrderStatus as updateOrderStatusService,
+  recordPayment as recordPaymentService,
   InvalidOrderValueError,
   type NewOrderInput,
   type NewOrderItemInput,
 } from "../services/ordersService";
-import { OrderNotFoundError, type Order } from "../repositories/ordersRepository";
+import { OrderNotFoundError, PaymentExceedsBalanceError, type Order } from "../repositories/ordersRepository";
 import { CustomerNotFoundError } from "../repositories/customersRepository";
 
 /** Thrown for a structurally malformed request (wrong type/shape). */
@@ -104,6 +105,23 @@ export function handleOrdersUpdateStatus(db: DatabaseSync, payload: unknown): vo
   updateOrderStatusService(db, validId, validStatus);
 }
 
+function validateAmountPaidRupees(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new InvalidOrderRequestError("Invalid payment amount");
+  }
+  return value;
+}
+
+export function handleOrdersRecordPayment(db: DatabaseSync, payload: unknown): Order {
+  if (typeof payload !== "object" || payload === null) {
+    throw new InvalidOrderRequestError("Invalid payload");
+  }
+  const { orderId, amountPaidRupees } = payload as { orderId?: unknown; amountPaidRupees?: unknown };
+  const validOrderId = validateOrderId(orderId);
+  const validAmount = validateAmountPaidRupees(amountPaidRupees);
+  return recordPaymentService(db, validOrderId, validAmount);
+}
+
 /**
  * Never exposes database paths, raw SQL, stack traces, or filesystem
  * paths to the renderer. Recognized validation/not-found errors pass
@@ -116,7 +134,8 @@ function toSafeError(error: unknown): Error {
     error instanceof InvalidOrderRequestError ||
     error instanceof InvalidOrderValueError ||
     error instanceof OrderNotFoundError ||
-    error instanceof CustomerNotFoundError
+    error instanceof CustomerNotFoundError ||
+    error instanceof PaymentExceedsBalanceError
   ) {
     return new Error(error.message);
   }
@@ -151,6 +170,14 @@ export function registerOrdersHandlers(db: DatabaseSync): void {
   ipcMain.handle("orders:updateStatus", (_event, payload: unknown) => {
     try {
       handleOrdersUpdateStatus(db, payload);
+    } catch (error) {
+      throw toSafeError(error);
+    }
+  });
+
+  ipcMain.handle("orders:recordPayment", (_event, payload: unknown) => {
+    try {
+      return handleOrdersRecordPayment(db, payload);
     } catch (error) {
       throw toSafeError(error);
     }

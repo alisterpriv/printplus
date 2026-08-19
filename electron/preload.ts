@@ -36,6 +36,8 @@ const ordersApi: OrdersApi = {
   get: (id) => ipcRenderer.invoke("orders:get", id),
   create: (input) => ipcRenderer.invoke("orders:create", input),
   updateStatus: (id, status) => ipcRenderer.invoke("orders:updateStatus", { id, status }),
+  recordPayment: (orderId, amountPaidRupees) =>
+    ipcRenderer.invoke("orders:recordPayment", { orderId, amountPaidRupees }),
 };
 
 const dashboardApi: DashboardApi = {

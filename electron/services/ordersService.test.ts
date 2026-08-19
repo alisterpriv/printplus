@@ -10,6 +10,7 @@ import {
   getOrder,
   createOrder,
   updateOrderStatus,
+  recordPayment,
   InvalidOrderValueError,
   ORDER_STATUSES,
   type NewOrderInput,
@@ -394,6 +395,87 @@ describe("ordersService", () => {
       const reloaded = getOrder(db, order.id);
       expect(reloaded.items[0].rate).toBe(500); // unaffected by the later rate change
       expect(listRates(db).find((r) => r.printType === "Flex")!.rate).toBe(650); // current rate really did change
+    });
+  });
+
+  describe("PHASE 15 — recordPayment", () => {
+    // baseInput's default single item (2m x 3m Flex @ ₹500) => subtotal 3000,
+    // gst 18% = 540, grandTotal 3540.
+
+    it("records a valid partial payment and returns updated payment fields", () => {
+      const order = createOrder(db, baseInput(customerId));
+      const updated = recordPayment(db, order.id, 1000);
+      expect(updated.amountPaid).toBe(1000);
+      expect(updated.balanceDue).toBe(2540);
+      expect(updated.paymentStatus).toBe("Partial");
+    });
+
+    it("converts a decimal rupee amount to paise without float drift", () => {
+      const order = createOrder(db, baseInput(customerId));
+      const updated = recordPayment(db, order.id, 10.5);
+      expect(updated.amountPaid).toBe(10.5);
+    });
+
+    it("rejects a zero payment amount", () => {
+      const order = createOrder(db, baseInput(customerId));
+      expect(() => recordPayment(db, order.id, 0)).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a negative payment amount", () => {
+      const order = createOrder(db, baseInput(customerId));
+      expect(() => recordPayment(db, order.id, -50)).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a non-finite payment amount (NaN)", () => {
+      const order = createOrder(db, baseInput(customerId));
+      expect(() => recordPayment(db, order.id, NaN)).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a non-finite payment amount (Infinity)", () => {
+      const order = createOrder(db, baseInput(customerId));
+      expect(() => recordPayment(db, order.id, Infinity)).toThrow(InvalidOrderValueError);
+    });
+
+    it("rejects a payment amount that exceeds the current balance, with a friendly message naming the balance", () => {
+      const order = createOrder(db, baseInput(customerId)); // grandTotal 3540
+      expect(() => recordPayment(db, order.id, 4000)).toThrow(InvalidOrderValueError);
+      try {
+        recordPayment(db, order.id, 4000);
+        expect.unreachable();
+      } catch (error) {
+        expect((error as Error).message).toMatch(/balance due of ₹3540\.00/);
+      }
+    });
+
+    it("rejects a payment that exceeds the balance after a prior partial payment reduces it", () => {
+      const order = createOrder(db, baseInput(customerId)); // grandTotal 3540
+      recordPayment(db, order.id, 3000);
+      expect(() => recordPayment(db, order.id, 1000)).toThrow(InvalidOrderValueError); // only 540 remains
+    });
+
+    it("reaching the full grand total transitions paymentStatus to Paid", () => {
+      const order = createOrder(db, baseInput(customerId)); // grandTotal 3540
+      const paid = recordPayment(db, order.id, 3540);
+      expect(paid.paymentStatus).toBe("Paid");
+      expect(paid.balanceDue).toBe(0);
+    });
+
+    it("propagates OrderNotFoundError for a nonexistent order id", () => {
+      expect(() => recordPayment(db, 999999, 100)).toThrow(OrderNotFoundError);
+    });
+
+    it("an already fully-paid order rejects any further payment", () => {
+      const order = createOrder(db, baseInput(customerId));
+      recordPayment(db, order.id, 3540);
+      expect(() => recordPayment(db, order.id, 1)).toThrow();
+    });
+
+    it("does not modify grand total, discount, or GST when recording a payment", () => {
+      const order = createOrder(db, baseInput(customerId));
+      const updated = recordPayment(db, order.id, 1000);
+      expect(updated.grandTotal).toBe(order.grandTotal);
+      expect(updated.discountAmount).toBe(order.discountAmount);
+      expect(updated.gstAmount).toBe(order.gstAmount);
     });
   });
 

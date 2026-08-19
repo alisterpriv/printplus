@@ -13,6 +13,7 @@ import {
   Plus,
   Eye,
   Settings,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { DashboardSummary } from "../../types/ipc-contracts";
@@ -147,6 +148,16 @@ export function Dashboard() {
               <p className="text-2xl font-bold">{summary.totalCustomers}</p>
             </div>
             <Users className="w-6 h-6 text-gray-500" />
+          </div>
+        </Card>
+
+        <Card className="p-6 border rounded-xl">
+          <div className="flex justify-between">
+            <div>
+              <p className="text-sm text-gray-500">Outstanding Amount</p>
+              <p className="text-2xl font-bold">₹{summary.outstandingAmount.toFixed(2)}</p>
+            </div>
+            <Wallet className="w-6 h-6 text-gray-500" />
           </div>
         </Card>
 

@@ -11,6 +11,7 @@ import {
   handleOrdersGet,
   handleOrdersCreate,
   handleOrdersUpdateStatus,
+  handleOrdersRecordPayment,
   InvalidOrderRequestError,
 } from "./ordersHandlers";
 import { InvalidOrderValueError } from "../services/ordersService";
@@ -181,6 +182,65 @@ describe("handleOrdersList / handleOrdersGet / handleOrdersCreate / handleOrders
   it("rejects a malformed updateStatus payload before touching the database", () => {
     expect(() => handleOrdersUpdateStatus(db, "nope")).toThrow(InvalidOrderRequestError);
     expect(() => handleOrdersUpdateStatus(db, { id: 1 })).toThrow(InvalidOrderRequestError);
+  });
+
+  describe("PHASE 15 — handleOrdersRecordPayment", () => {
+    it("records a valid payment through the full handler logic", () => {
+      const created = handleOrdersCreate(db, validPayload()); // grandTotal 590 (500 + 18% GST)
+      const updated = handleOrdersRecordPayment(db, { orderId: created.id, amountPaidRupees: 200 });
+      expect(updated.amountPaid).toBe(200);
+      expect(updated.paymentStatus).toBe("Partial");
+    });
+
+    it("rejects a malformed payload before touching the database", () => {
+      expect(() => handleOrdersRecordPayment(db, "nope")).toThrow(InvalidOrderRequestError);
+      expect(() => handleOrdersRecordPayment(db, { orderId: 1 })).toThrow(InvalidOrderRequestError);
+    });
+
+    it("rejects an invalid orderId", () => {
+      expect(() => handleOrdersRecordPayment(db, { orderId: "1", amountPaidRupees: 100 })).toThrow(
+        InvalidOrderRequestError
+      );
+      expect(() => handleOrdersRecordPayment(db, { orderId: 0, amountPaidRupees: 100 })).toThrow(
+        InvalidOrderRequestError
+      );
+    });
+
+    it("rejects an invalid amountPaidRupees at the transport layer", () => {
+      const created = handleOrdersCreate(db, validPayload());
+      expect(() =>
+        handleOrdersRecordPayment(db, { orderId: created.id, amountPaidRupees: "100" })
+      ).toThrow(InvalidOrderRequestError);
+      expect(() =>
+        handleOrdersRecordPayment(db, { orderId: created.id, amountPaidRupees: NaN })
+      ).toThrow(InvalidOrderRequestError);
+    });
+
+    it("delegates business validation (zero amount) to the service", () => {
+      const created = handleOrdersCreate(db, validPayload());
+      expect(() => handleOrdersRecordPayment(db, { orderId: created.id, amountPaidRupees: 0 })).toThrow(
+        InvalidOrderValueError
+      );
+    });
+
+    it("propagates an overpayment rejection from the service", () => {
+      const created = handleOrdersCreate(db, validPayload()); // grandTotal 590
+      expect(() =>
+        handleOrdersRecordPayment(db, { orderId: created.id, amountPaidRupees: 1000 })
+      ).toThrow(InvalidOrderValueError);
+    });
+
+    it("propagates OrderNotFoundError for a nonexistent order id", () => {
+      expect(() => handleOrdersRecordPayment(db, { orderId: 999999, amountPaidRupees: 100 })).toThrow(
+        OrderNotFoundError
+      );
+    });
+
+    it("a subsequent handleOrdersGet reflects the recorded payment", () => {
+      const created = handleOrdersCreate(db, validPayload());
+      handleOrdersRecordPayment(db, { orderId: created.id, amountPaidRupees: 590 });
+      expect(handleOrdersGet(db, created.id).paymentStatus).toBe("Paid");
+    });
   });
 
   describe("PHASE 11 — invoice numbers", () => {

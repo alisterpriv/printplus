@@ -192,4 +192,27 @@ export const migrations: Migration[] = [
       db.exec(`CREATE UNIQUE INDEX idx_orders_invoice_number ON orders(invoice_number)`);
     },
   },
+  {
+    version: 8,
+    name: "add_payment_tracking_to_orders",
+    up: (db) => {
+      // Payment status (Unpaid/Partial/Paid) is deliberately NOT a column
+      // — it's a pure function of amount_paid_paise and grand_total_paise,
+      // computed at read time in ordersRepository.ts, so there is nothing
+      // here that could ever drift out of sync with a stored status value.
+      //
+      // No historical payment data exists to backfill: every existing
+      // order honestly becomes amount_paid_paise = 0 (Unpaid) via the
+      // column default, the same "empty, not fabricated" approach
+      // migration 3/6 already used for their own seed data.
+      //
+      // The CHECK constraint is defense-in-depth, not the primary
+      // enforcement mechanism — the real invariant is enforced by
+      // ordersRepository.recordPayment's atomic guarded UPDATE.
+      db.exec(`
+        ALTER TABLE orders ADD COLUMN amount_paid_paise INTEGER NOT NULL DEFAULT 0
+          CHECK (amount_paid_paise >= 0 AND amount_paid_paise <= grand_total_paise)
+      `);
+    },
+  },
 ];

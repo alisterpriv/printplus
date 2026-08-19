@@ -12,6 +12,8 @@ export interface OrderItem {
   total: number;
 }
 
+export type PaymentStatus = "Unpaid" | "Partial" | "Paid";
+
 export interface Order {
   id: number;
   invoiceNumber: string;
@@ -27,6 +29,9 @@ export interface Order {
   gstPercent: number;
   gstAmount: number;
   grandTotal: number;
+  amountPaid: number;
+  balanceDue: number;
+  paymentStatus: PaymentStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +78,7 @@ interface OrderRow {
   gst_percent: number;
   gst_paise: number;
   grand_total_paise: number;
+  amount_paid_paise: number;
   created_at: string;
   updated_at: string;
 }
@@ -93,8 +99,22 @@ interface OrderItemRow {
 /** Thrown when a lookup targets an order id that doesn't exist. */
 export class OrderNotFoundError extends Error {}
 
+/** Thrown when a payment amount would exceed the order's remaining balance. */
+export class PaymentExceedsBalanceError extends Error {}
+
 function paiseToRupees(paise: number): number {
   return paise / 100;
+}
+
+/**
+ * paymentStatus is never stored — it's a pure function of
+ * amount_paid_paise and grand_total_paise, so there is nothing that
+ * could ever drift out of sync with a persisted status value.
+ */
+function derivePaymentStatus(amountPaidPaise: number, grandTotalPaise: number): PaymentStatus {
+  if (amountPaidPaise <= 0) return "Unpaid";
+  if (amountPaidPaise >= grandTotalPaise) return "Paid";
+  return "Partial";
 }
 
 function toOrderItem(row: OrderItemRow): OrderItem {
@@ -127,6 +147,9 @@ function toOrder(row: OrderRow, items: OrderItem[]): Order {
     gstPercent: row.gst_percent,
     gstAmount: paiseToRupees(row.gst_paise),
     grandTotal: paiseToRupees(row.grand_total_paise),
+    amountPaid: paiseToRupees(row.amount_paid_paise),
+    balanceDue: paiseToRupees(row.grand_total_paise - row.amount_paid_paise),
+    paymentStatus: derivePaymentStatus(row.amount_paid_paise, row.grand_total_paise),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -237,6 +260,39 @@ export function updateOrderStatus(db: DatabaseSync, id: number, status: string):
 }
 
 /**
+ * Atomically increments amount_paid_paise, guarded in the same UPDATE by
+ * the invariant that the new cumulative total must not exceed
+ * grand_total_paise — this WHERE clause is the actual enforcement
+ * mechanism, not a separate read-then-write check. Never touches
+ * grand_total_paise, discount/GST/subtotal, the customer snapshot, or
+ * order_items — only amount_paid_paise and updated_at.
+ *
+ * If zero rows are affected, a follow-up lookup disambiguates why: either
+ * the order doesn't exist, or the payment would have exceeded the
+ * remaining balance (including an already-fully-paid order, for which
+ * any further positive payment always exceeds the balance by definition).
+ */
+export function recordPayment(db: DatabaseSync, orderId: number, additionalAmountPaise: number): Order {
+  const result = db
+    .prepare(
+      `UPDATE orders
+       SET amount_paid_paise = amount_paid_paise + ?, updated_at = datetime('now')
+       WHERE id = ? AND amount_paid_paise + ? <= grand_total_paise`
+    )
+    .run(additionalAmountPaise, orderId, additionalAmountPaise);
+
+  if (result.changes === 0) {
+    const exists = db.prepare("SELECT 1 FROM orders WHERE id = ?").get(orderId);
+    if (!exists) {
+      throw new OrderNotFoundError(`No order found with id ${orderId}`);
+    }
+    throw new PaymentExceedsBalanceError("Payment amount exceeds the remaining balance.");
+  }
+
+  return getOrder(db, orderId);
+}
+
+/**
  * PHASE 9 — a half-open UTC range: created_at >= startUtc AND created_at
  * < endUtc. Both bounds must already be in the same "YYYY-MM-DD HH:MM:SS"
  * UTC-naive string format orders.created_at is stored in — computing that
@@ -276,6 +332,19 @@ export function sumGrandTotalPaise(db: DatabaseSync, range: DateRange): number {
   const row = db
     .prepare("SELECT COALESCE(SUM(grand_total_paise), 0) as total FROM orders WHERE created_at >= ? AND created_at < ?")
     .get(range.startUtc, range.endUtc) as { total: number };
+  return row.total;
+}
+
+/**
+ * All-time total owed across every order, not scoped to "today" — an
+ * unpaid balance from an older order is just as real as one from today.
+ * A fully-paid order contributes exactly 0, so no WHERE filter is needed.
+ * Exact integer SQL sum, never a rupee-float sum in TypeScript.
+ */
+export function sumOutstandingBalancePaise(db: DatabaseSync): number {
+  const row = db
+    .prepare("SELECT COALESCE(SUM(grand_total_paise - amount_paid_paise), 0) as total FROM orders")
+    .get() as { total: number };
   return row.total;
 }
 

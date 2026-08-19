@@ -20,6 +20,9 @@ const ORDER: Order = {
   gstPercent: 18,
   gstAmount: 90,
   grandTotal: 590,
+  amountPaid: 0,
+  balanceDue: 590,
+  paymentStatus: "Unpaid",
   createdAt: "2026-01-01 00:00:00",
   updatedAt: "2026-01-01 00:00:00",
 };
@@ -79,5 +82,35 @@ describe("Orders", () => {
 
     expect(screen.getByText(/loading orders/i)).toBeTruthy();
     expect(await screen.findByText("Ramesh")).toBeTruthy();
+  });
+
+  describe("PHASE 15 — read-only payment status", () => {
+    it("shows an Unpaid badge for an unpaid order", async () => {
+      mockApi(vi.fn().mockResolvedValue([ORDER]));
+      renderOrders();
+      expect(await screen.findByText("Unpaid")).toBeTruthy();
+    });
+
+    it("shows a Partial badge for a partially-paid order", async () => {
+      const partial: Order = { ...ORDER, amountPaid: 200, balanceDue: 390, paymentStatus: "Partial" };
+      mockApi(vi.fn().mockResolvedValue([partial]));
+      renderOrders();
+      expect(await screen.findByText("Partial")).toBeTruthy();
+    });
+
+    it("shows a Paid badge for a fully-paid order", async () => {
+      const paid: Order = { ...ORDER, amountPaid: 590, balanceDue: 0, paymentStatus: "Paid" };
+      mockApi(vi.fn().mockResolvedValue([paid]));
+      renderOrders();
+      expect(await screen.findByText("Paid")).toBeTruthy();
+    });
+
+    it("does not add a payment-recording control to the row — display only", async () => {
+      mockApi(vi.fn().mockResolvedValue([ORDER]));
+      renderOrders();
+      await screen.findByText("Ramesh");
+      // Exactly the pre-existing three row actions (status dropdown, View, Print) — no fourth "record payment" control.
+      expect(screen.getAllByRole("button")).toHaveLength(3);
+    });
   });
 });

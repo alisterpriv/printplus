@@ -8,6 +8,7 @@ import {
   getOrder,
   createOrder,
   updateOrderStatus,
+  recordPayment,
   countOrders,
   countOrdersByStatus,
   countOrdersInRange,
@@ -15,6 +16,7 @@ import {
   getRecentOrders,
   getTopPrintTypes,
   OrderNotFoundError,
+  PaymentExceedsBalanceError,
   type CreateOrderInput,
 } from "./ordersRepository";
 
@@ -118,6 +120,128 @@ describe("ordersRepository", () => {
 
   it("updateOrderStatus throws OrderNotFoundError for a nonexistent id", () => {
     expect(() => updateOrderStatus(db, 999999, "Completed")).toThrow(OrderNotFoundError);
+  });
+
+  describe("PHASE 15 — payment tracking", () => {
+    it("a newly-created order starts Unpaid, with the full grand total as the balance due", () => {
+      const order = createOrder(db, baseOrderInput(customerId)); // grandTotal 590
+      expect(order.amountPaid).toBe(0);
+      expect(order.balanceDue).toBe(590);
+      expect(order.paymentStatus).toBe("Unpaid");
+    });
+
+    it("records a partial payment, updating amountPaid/balanceDue/paymentStatus", () => {
+      const created = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+      const updated = recordPayment(db, created.id, 30000);
+      expect(updated.amountPaid).toBe(300);
+      expect(updated.balanceDue).toBe(290);
+      expect(updated.paymentStatus).toBe("Partial");
+    });
+
+    it("accumulates multiple payments cumulatively", () => {
+      const created = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+      recordPayment(db, created.id, 30000);
+      const afterSecond = recordPayment(db, created.id, 20000);
+      expect(afterSecond.amountPaid).toBe(500);
+      expect(afterSecond.balanceDue).toBe(90);
+      expect(afterSecond.paymentStatus).toBe("Partial");
+    });
+
+    it("reaching the exact grand total via a final payment transitions to Paid with zero balance", () => {
+      const created = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+      recordPayment(db, created.id, 30000);
+      const final = recordPayment(db, created.id, 29000);
+      expect(final.amountPaid).toBe(590);
+      expect(final.balanceDue).toBe(0);
+      expect(final.paymentStatus).toBe("Paid");
+    });
+
+    it("paying the full amount in a single payment transitions directly to Paid", () => {
+      const created = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+      const paid = recordPayment(db, created.id, 59000);
+      expect(paid.paymentStatus).toBe("Paid");
+      expect(paid.balanceDue).toBe(0);
+    });
+
+    it("a payment landing exactly on the remaining balance succeeds", () => {
+      const created = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+      recordPayment(db, created.id, 40000);
+      const final = recordPayment(db, created.id, 19000); // exactly the remaining balance
+      expect(final.amountPaid).toBe(590);
+      expect(final.paymentStatus).toBe("Paid");
+    });
+
+    it("rejects a payment that would exceed the remaining balance, leaving amountPaid unchanged", () => {
+      const created = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+      recordPayment(db, created.id, 40000);
+      expect(() => recordPayment(db, created.id, 20000)).toThrow(PaymentExceedsBalanceError); // 40000+20000 > 59000
+
+      const after = getOrder(db, created.id);
+      expect(after.amountPaid).toBe(400); // unchanged by the rejected attempt
+    });
+
+    it("rejects a payment on a nonexistent order", () => {
+      expect(() => recordPayment(db, 999999, 10000)).toThrow(OrderNotFoundError);
+    });
+
+    it("a fully-paid order cannot receive another payment", () => {
+      const created = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+      recordPayment(db, created.id, 59000);
+      expect(() => recordPayment(db, created.id, 1)).toThrow(PaymentExceedsBalanceError);
+
+      const after = getOrder(db, created.id);
+      expect(after.amountPaid).toBe(590); // unchanged
+      expect(after.paymentStatus).toBe("Paid");
+    });
+
+    it("recording a payment never modifies grand total, discount, GST, or subtotal", () => {
+      const created = createOrder(db, baseOrderInput(customerId));
+      recordPayment(db, created.id, 30000);
+      const after = getOrder(db, created.id);
+      expect(after.subtotal).toBe(created.subtotal);
+      expect(after.discountPercent).toBe(created.discountPercent);
+      expect(after.discountAmount).toBe(created.discountAmount);
+      expect(after.gstPercent).toBe(created.gstPercent);
+      expect(after.gstAmount).toBe(created.gstAmount);
+      expect(after.grandTotal).toBe(created.grandTotal);
+    });
+
+    it("recording a payment never modifies the customer snapshot or order items", () => {
+      const created = createOrder(db, baseOrderInput(customerId));
+      recordPayment(db, created.id, 30000);
+      const after = getOrder(db, created.id);
+      expect(after.customerId).toBe(created.customerId);
+      expect(after.customerName).toBe(created.customerName);
+      expect(after.customerPhone).toBe(created.customerPhone);
+      expect(after.customerAddress).toBe(created.customerAddress);
+      expect(after.items).toEqual(created.items);
+    });
+
+    it("recording a payment never modifies the invoice number", () => {
+      const created = createOrder(db, baseOrderInput(customerId));
+      recordPayment(db, created.id, 30000);
+      expect(getOrder(db, created.id).invoiceNumber).toBe(created.invoiceNumber);
+    });
+
+    it("recording a payment updates updated_at", () => {
+      const created = createOrder(db, baseOrderInput(customerId));
+      const after = recordPayment(db, created.id, 30000);
+      expect(typeof after.updatedAt).toBe("string");
+    });
+
+    it("the database rejects a directly-written negative amount_paid_paise, independent of recordPayment", () => {
+      const created = createOrder(db, baseOrderInput(customerId));
+      expect(() =>
+        db.prepare("UPDATE orders SET amount_paid_paise = -1 WHERE id = ?").run(created.id)
+      ).toThrow();
+    });
+
+    it("the database rejects a directly-written amount_paid_paise exceeding grand_total_paise, independent of recordPayment", () => {
+      const created = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+      expect(() =>
+        db.prepare("UPDATE orders SET amount_paid_paise = 60000 WHERE id = ?").run(created.id)
+      ).toThrow();
+    });
   });
 
   describe("transactional integrity", () => {

@@ -48,6 +48,8 @@ export interface CustomersApi {
 
 export type OrderStatus = "Pending" | "Processing" | "Completed";
 
+export type PaymentStatus = "Unpaid" | "Partial" | "Paid";
+
 export interface OrderItem {
   id: number;
   printType: string;
@@ -75,6 +77,9 @@ export interface Order {
   gstPercent: number;
   gstAmount: number;
   grandTotal: number;
+  amountPaid: number;
+  balanceDue: number;
+  paymentStatus: PaymentStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -100,6 +105,7 @@ export interface OrdersApi {
   get(id: number): Promise<Order>;
   create(input: OrderInput): Promise<Order>;
   updateStatus(id: number, status: OrderStatus): Promise<void>;
+  recordPayment(orderId: number, amountPaidRupees: number): Promise<Order>;
 }
 
 export interface DashboardRecentOrder {
@@ -119,6 +125,7 @@ export interface DashboardSummary {
   totalCustomers: number;
   recentOrders: DashboardRecentOrder[];
   mostUsedPrintType: string | null;
+  outstandingAmount: number;
 }
 
 export interface DashboardApi {

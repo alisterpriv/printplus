@@ -679,3 +679,171 @@ describe("the real, shipped migration list (v1-v7, invoice numbers)", () => {
     expect(second).toEqual(first);
   });
 });
+
+describe("the real, shipped migration list (v1-v8, payment tracking)", () => {
+  function insertCustomer(db: DatabaseSync): number {
+    db.prepare(
+      "INSERT INTO customers (name, phone, email, address, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("Ramesh", "123", null, "Road");
+    return (db.prepare("SELECT id FROM customers WHERE name = 'Ramesh'").get() as { id: number }).id;
+  }
+
+  function insertOrder(db: DatabaseSync, customerId: number, grandTotalPaise: number): number {
+    const result = db
+      .prepare(
+        `INSERT INTO orders (
+           customer_id, customer_name, customer_phone, customer_address, status,
+           subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      )
+      .run(customerId, "Ramesh", "123", "Road", "Pending", grandTotalPaise, 0, 0, 18, 0, grandTotalPaise);
+    const orderId = result.lastInsertRowid as number;
+    // invoice_number defaults to '' (migration 7) — multiple '' rows would
+    // collide with its UNIQUE index, so give each test order a real,
+    // distinct number, the same way the real repository does.
+    db.prepare("UPDATE orders SET invoice_number = ? WHERE id = ?").run(
+      `INV-${String(orderId).padStart(6, "0")}`,
+      orderId
+    );
+    return orderId;
+  }
+
+  it("adds amount_paid_paise, readable as an empty result set on a fresh database with no orders", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    expect(db.prepare("SELECT amount_paid_paise FROM orders").all()).toHaveLength(0);
+    db.close();
+  });
+
+  it("defaults amount_paid_paise to 0 for a newly-inserted order on a fresh database", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const customerId = insertCustomer(db);
+    const orderId = insertOrder(db, customerId, 5900);
+    const row = db.prepare("SELECT amount_paid_paise FROM orders WHERE id = ?").get(orderId) as {
+      amount_paid_paise: number;
+    };
+    expect(row.amount_paid_paise).toBe(0);
+    db.close();
+  });
+
+  it("records migration version 8 among the applied set", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((v) => v.version)).toEqual(expect.arrayContaining([1, 2, 3, 4, 5, 6, 7, 8]));
+    db.close();
+  });
+
+  it("applies cleanly to an existing v1-v7 database (simulating a real prior install) by applying only migration 8", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 7));
+
+    expect(() => db.prepare("SELECT amount_paid_paise FROM orders").all()).toThrow();
+
+    runMigrations(db); // full, real list — should apply only the newly-pending migration 8
+
+    const rows = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as {
+      version: number;
+    }[];
+    expect(rows.map((v) => v.version)).toEqual(expect.arrayContaining([1, 2, 3, 4, 5, 6, 7, 8]));
+    expect(() => db.prepare("SELECT amount_paid_paise FROM orders").all()).not.toThrow();
+    db.close();
+  });
+
+  it("upgrades every pre-existing order to amount_paid_paise = 0 (Unpaid) — no historical payment data is fabricated", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 7));
+    const customerId = insertCustomer(db);
+    insertOrder(db, customerId, 5900);
+    insertOrder(db, customerId, 12000);
+
+    runMigrations(db); // applies migration 8 on top of existing real orders
+
+    const rows = db.prepare("SELECT amount_paid_paise FROM orders").all() as { amount_paid_paise: number }[];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.amount_paid_paise === 0)).toBe(true);
+    db.close();
+  });
+
+  it("leaves invoice numbers, customer data, and order totals untouched when adding payment tracking", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 7));
+    const customerId = insertCustomer(db);
+    const orderId = insertOrder(db, customerId, 5900);
+
+    const before = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as {
+      invoice_number: string;
+      customer_name: string;
+      grand_total_paise: number;
+      subtotal_paise: number;
+    };
+
+    runMigrations(db);
+
+    const after = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as {
+      invoice_number: string;
+      customer_name: string;
+      grand_total_paise: number;
+      subtotal_paise: number;
+    };
+    expect(after.invoice_number).toBe(before.invoice_number);
+    expect(after.customer_name).toBe(before.customer_name);
+    expect(after.grand_total_paise).toBe(before.grand_total_paise);
+    expect(after.subtotal_paise).toBe(before.subtotal_paise);
+
+    const customers = db.prepare("SELECT * FROM customers").all();
+    expect(customers).toHaveLength(1);
+    db.close();
+  });
+
+  it("running the full list twice is safe and does not alter amount_paid_paise", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db, realMigrations.slice(0, 7));
+    const customerId = insertCustomer(db);
+    const orderId = insertOrder(db, customerId, 5900);
+
+    runMigrations(db);
+    db.prepare("UPDATE orders SET amount_paid_paise = 2000 WHERE id = ?").run(orderId);
+    runMigrations(db); // idempotent — migration 8 is already recorded, must not re-run and reset the value
+
+    const row = db.prepare("SELECT amount_paid_paise FROM orders WHERE id = ?").get(orderId) as {
+      amount_paid_paise: number;
+    };
+    expect(row.amount_paid_paise).toBe(2000);
+    db.close();
+  });
+
+  it("enforces the CHECK constraint: rejects a negative amount_paid_paise at the database layer", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const customerId = insertCustomer(db);
+    const orderId = insertOrder(db, customerId, 5900);
+
+    expect(() => db.prepare("UPDATE orders SET amount_paid_paise = -1 WHERE id = ?").run(orderId)).toThrow();
+    db.close();
+  });
+
+  it("enforces the CHECK constraint: rejects amount_paid_paise exceeding grand_total_paise at the database layer", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const customerId = insertCustomer(db);
+    const orderId = insertOrder(db, customerId, 5900);
+
+    expect(() => db.prepare("UPDATE orders SET amount_paid_paise = 5901 WHERE id = ?").run(orderId)).toThrow();
+    db.close();
+  });
+
+  it("the CHECK constraint allows amount_paid_paise exactly equal to grand_total_paise (fully paid)", () => {
+    const db = createConnection(":memory:");
+    runMigrations(db);
+    const customerId = insertCustomer(db);
+    const orderId = insertOrder(db, customerId, 5900);
+
+    expect(() => db.prepare("UPDATE orders SET amount_paid_paise = 5900 WHERE id = ?").run(orderId)).not.toThrow();
+    db.close();
+  });
+});

@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router";
 import { Button } from "./ui/button";
-import { Printer, ArrowLeft } from "lucide-react";
-import type { Order, BusinessSettings } from "../../types/ipc-contracts";
+import { Badge } from "./ui/badge";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
+import { Printer, ArrowLeft, Wallet } from "lucide-react";
+import { toast } from "sonner";
+import type { Order, BusinessSettings, PaymentStatus } from "../../types/ipc-contracts";
+import { getErrorMessage } from "../lib/getErrorMessage";
 
 /**
  * Renders the historical Order exactly as persisted (customer snapshot,
@@ -19,6 +25,41 @@ function formatOrderDate(createdAt: string): string {
   return Number.isNaN(parsed.getTime()) ? createdAt : parsed.toLocaleDateString();
 }
 
+function getPaymentStatusBadge(status: PaymentStatus) {
+  switch (status) {
+    case "Paid":
+      return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">{status}</Badge>;
+    case "Partial":
+      return <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">{status}</Badge>;
+    default:
+      return <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-100">{status}</Badge>;
+  }
+}
+
+/**
+ * PHASE 15 — client-side mirror of ordersService.recordPayment's
+ * validation, for immediate feedback only; the service remains
+ * authoritative. balanceDue is the exact ceiling — the server enforces
+ * the real invariant in integer paise regardless of what this allows
+ * through.
+ */
+export function validatePaymentAmount(value: string, balanceDue: number): string | undefined {
+  if (value.trim() === "") {
+    return "Please enter a payment amount.";
+  }
+  const amount = parseFloat(value);
+  if (!Number.isFinite(amount)) {
+    return "Please enter a valid payment amount.";
+  }
+  if (amount <= 0) {
+    return "Payment amount must be greater than zero.";
+  }
+  if (amount > balanceDue) {
+    return `Payment amount cannot exceed the balance due of ₹${balanceDue.toFixed(2)}.`;
+  }
+  return undefined;
+}
+
 export function PrintInvoice() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -26,6 +67,11 @@ export function PrintInvoice() {
   const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+  const [paymentAmountInput, setPaymentAmountInput] = useState("");
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
 
   // An invoice needs both the order and the current business identity to
   // render meaningfully — if either fetch fails, the existing not-found
@@ -48,6 +94,36 @@ export function PrintInvoice() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleOpenPaymentDialog = () => {
+    if (!order) return;
+    setPaymentAmountInput(order.balanceDue.toFixed(2));
+    setPaymentError(null);
+    setIsPaymentDialogOpen(true);
+  };
+
+  const handleRecordPayment = async () => {
+    if (!order) return;
+    const validationError = validatePaymentAmount(paymentAmountInput, order.balanceDue);
+    if (validationError) {
+      setPaymentError(validationError);
+      return;
+    }
+
+    setIsRecordingPayment(true);
+    try {
+      const updated = await window.api.orders.recordPayment(order.id, parseFloat(paymentAmountInput));
+      setOrder(updated);
+      setIsPaymentDialogOpen(false);
+      toast.success("Payment recorded");
+    } catch (error) {
+      // Preserve the entered amount and the currently-displayed order —
+      // a failed payment must never corrupt what's shown as already paid.
+      toast.error(getErrorMessage(error, "Failed to record payment"));
+    } finally {
+      setIsRecordingPayment(false);
+    }
   };
 
   if (isLoading) {
@@ -80,6 +156,15 @@ export function PrintInvoice() {
             Back
           </Button>
           <div className="flex gap-3">
+            <Button
+              onClick={handleOpenPaymentDialog}
+              disabled={order.paymentStatus === "Paid"}
+              variant="outline"
+              className="border-gray-300"
+            >
+              <Wallet className="w-4 h-4 mr-2" />
+              Record Payment
+            </Button>
             <Button
               onClick={handlePrint}
               className="bg-[#2563EB] hover:bg-blue-700"
@@ -197,6 +282,18 @@ export function PrintInvoice() {
                 <span className="font-bold text-gray-900">Grand Total:</span>
                 <span className="text-xl font-bold text-[#2563EB]">₹{order.grandTotal.toFixed(2)}</span>
               </div>
+              <div className="flex justify-between py-2 border-b border-gray-200">
+                <span className="text-sm text-gray-600">Paid:</span>
+                <span className="text-sm font-semibold text-gray-900">₹{order.amountPaid.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between py-2 border-b border-gray-200">
+                <span className="text-sm text-gray-600">Balance Due:</span>
+                <span className="text-sm font-semibold text-gray-900">₹{order.balanceDue.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm text-gray-600">Payment Status:</span>
+                {getPaymentStatusBadge(order.paymentStatus)}
+              </div>
             </div>
           </div>
 
@@ -213,6 +310,69 @@ export function PrintInvoice() {
           </div>
         </div>
       </div>
+
+      {/* Record Payment Dialog */}
+      <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record Payment</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1 text-sm text-gray-600">
+              <div className="flex justify-between">
+                <span>Total</span>
+                <span className="font-semibold text-gray-900">₹{order.grandTotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Already Paid</span>
+                <span className="font-semibold text-gray-900">₹{order.amountPaid.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Balance Due</span>
+                <span className="font-semibold text-gray-900">₹{order.balanceDue.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="paymentAmount">Amount</Label>
+              <Input
+                id="paymentAmount"
+                type="number"
+                value={paymentAmountInput}
+                onChange={(e) => {
+                  setPaymentAmountInput(e.target.value);
+                  if (paymentError) setPaymentError(null);
+                }}
+                placeholder="Enter amount"
+                className="mt-1"
+                step="0.01"
+                min="0"
+                autoFocus
+              />
+              {paymentError && <p className="text-sm text-red-600 mt-1">{paymentError}</p>}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="border-gray-300"
+              onClick={() => setIsPaymentDialogOpen(false)}
+              disabled={isRecordingPayment}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-[#2563EB] hover:bg-blue-700"
+              onClick={handleRecordPayment}
+              disabled={isRecordingPayment}
+            >
+              {isRecordingPayment ? "Recording..." : "Record Payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

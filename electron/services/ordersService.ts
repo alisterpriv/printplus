@@ -12,6 +12,7 @@ import {
   getOrder as repoGetOrder,
   createOrder as repoCreateOrder,
   updateOrderStatus as repoUpdateOrderStatus,
+  recordPayment as repoRecordPayment,
   type Order,
   type CreateOrderItemInput,
 } from "../repositories/ordersRepository";
@@ -192,4 +193,36 @@ export function updateOrderStatus(db: DatabaseSync, id: number, status: string):
     throw new InvalidOrderValueError(`Invalid status: ${status}`);
   }
   repoUpdateOrderStatus(db, id, status);
+}
+
+/**
+ * Authoritative payment validation. Payments are cumulative and
+ * increment-only — there is no edit/reduce/delete operation in this
+ * phase; a data-entry mistake has no in-app correction path here by
+ * design (see repository/migration doc comments).
+ *
+ * The balance pre-check below exists only to produce a specific,
+ * friendly error message ("exceeds the balance due of ₹X") — it is safe
+ * (not racy) because this app runs a single SQLite connection on a
+ * single thread, so no concurrent writer can change the balance between
+ * this check and the repository call. The repository's atomic guarded
+ * UPDATE remains the actual, authoritative correctness enforcement
+ * (see recordPayment in ordersRepository.ts).
+ */
+export function recordPayment(db: DatabaseSync, orderId: number, amountPaidRupees: number): Order {
+  if (!Number.isFinite(amountPaidRupees)) {
+    throw new InvalidOrderValueError("Payment amount must be a valid number.");
+  }
+  if (!(amountPaidRupees > 0)) {
+    throw new InvalidOrderValueError("Payment amount must be greater than zero.");
+  }
+
+  const order = repoGetOrder(db, orderId);
+  if (amountPaidRupees > order.balanceDue) {
+    throw new InvalidOrderValueError(
+      `Payment amount cannot exceed the balance due of ₹${order.balanceDue.toFixed(2)}.`
+    );
+  }
+
+  return repoRecordPayment(db, orderId, rupeesToPaise(amountPaidRupees));
 }

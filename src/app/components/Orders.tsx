@@ -12,7 +12,7 @@ import {
 } from "./ui/dropdown-menu";
 import { Search, Eye, Printer } from "lucide-react";
 import { toast } from "sonner";
-import type { Order, OrderStatus } from "../../types/ipc-contracts";
+import type { Order, OrderStatus, PaymentStatus } from "../../types/ipc-contracts";
 import { getErrorMessage } from "../lib/getErrorMessage";
 
 const ORDER_STATUSES: OrderStatus[] = ["Pending", "Processing", "Completed"];
@@ -56,6 +56,17 @@ export function Orders() {
         return <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">{status}</Badge>;
       case "Processing":
         return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">{status}</Badge>;
+      default:
+        return <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-100">{status}</Badge>;
+    }
+  };
+
+  const getPaymentStatusBadge = (status: PaymentStatus) => {
+    switch (status) {
+      case "Paid":
+        return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">{status}</Badge>;
+      case "Partial":
+        return <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">{status}</Badge>;
       default:
         return <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-100">{status}</Badge>;
     }
@@ -123,6 +134,7 @@ export function Orders() {
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Amount</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Date & Time</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Status</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Payment</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Actions</th>
               </tr>
             </thead>
@@ -158,6 +170,9 @@ export function Orders() {
                           ))}
                         </DropdownMenuContent>
                       </DropdownMenu>
+                    </td>
+                    <td className="px-6 py-4">
+                      {getPaymentStatusBadge(order.paymentStatus)}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2">

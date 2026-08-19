@@ -17,6 +17,7 @@ const POPULATED_SUMMARY: DashboardSummary = {
     { id: 41, customerName: "Suresh", status: "Completed", grandTotal: 354.5, createdAt: "2026-01-01 09:00:00" },
   ],
   mostUsedPrintType: "Flex",
+  outstandingAmount: 987.65,
 };
 
 const ZERO_SUMMARY: DashboardSummary = {
@@ -28,6 +29,7 @@ const ZERO_SUMMARY: DashboardSummary = {
   totalCustomers: 0,
   recentOrders: [],
   mostUsedPrintType: null,
+  outstandingAmount: 0,
 };
 
 function mockApi(getSummary: PrintPlusApi["dashboard"]["getSummary"]) {
@@ -75,6 +77,7 @@ describe("Dashboard", () => {
     expect(screen.getByText("Ramesh")).toBeTruthy();
     expect(screen.getByText("Suresh")).toBeTruthy();
     expect(screen.getByText("Flex")).toBeTruthy();
+    expect(screen.getByText("₹987.65")).toBeTruthy(); // Outstanding Amount
 
     // The old hardcoded placeholders must be gone.
     expect(screen.queryByText("No recent bills")).toBeNull();
@@ -85,9 +88,19 @@ describe("Dashboard", () => {
     mockApi(vi.fn().mockResolvedValue(ZERO_SUMMARY));
     renderDashboard();
 
-    expect(await screen.findByText("₹0.00")).toBeTruthy();
+    // Both Today's Revenue and Outstanding Amount are genuinely ₹0.00 here.
+    const zeroAmounts = await screen.findAllByText("₹0.00");
+    expect(zeroAmounts).toHaveLength(2);
     expect(screen.getByText("No orders yet")).toBeTruthy();
     expect(screen.getByText("No data yet")).toBeTruthy();
+  });
+
+  it("Outstanding Amount does not affect and is not affected by Today's Revenue", async () => {
+    mockApi(vi.fn().mockResolvedValue(POPULATED_SUMMARY));
+    renderDashboard();
+
+    expect(await screen.findByText("₹1234.50")).toBeTruthy(); // Today's Revenue — booked value, unchanged
+    expect(screen.getByText("₹987.65")).toBeTruthy(); // Outstanding Amount — a distinct figure
   });
 
   it("shows an error state instead of a blank or fake-zero screen when the summary request fails", async () => {
