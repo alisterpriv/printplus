@@ -323,4 +323,44 @@ describe("Settings", () => {
       await screen.findByRole("button", { name: /^backup now$/i });
     });
   });
+
+  describe("PHASE 18 — non-functional settings removed", () => {
+    it("does not render the Invoice Settings, Preferences, or Currency Settings cards", async () => {
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn());
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      expect(screen.queryByText("Invoice Settings")).toBeNull();
+      expect(screen.queryByText("Preferences")).toBeNull();
+      expect(screen.queryByText("Currency Settings")).toBeNull();
+    });
+
+    it("does not render any of the removed fields/controls", async () => {
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn());
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      expect(screen.queryByLabelText(/invoice prefix/i)).toBeNull();
+      expect(screen.queryByLabelText(/default gst/i)).toBeNull();
+      expect(screen.queryByLabelText(/terms.*conditions/i)).toBeNull();
+      expect(screen.queryByText(/auto backup/i)).toBeNull();
+      expect(screen.queryByText(/email notifications/i)).toBeNull();
+      expect(screen.queryByText(/auto-save on print/i)).toBeNull();
+      expect(screen.queryByLabelText(/decimal places/i)).toBeNull();
+      // "Currency" as a labeled field (the removed, disabled "INR (₹)" input) is gone too.
+      expect(screen.queryByLabelText(/^currency$/i)).toBeNull();
+    });
+
+    it("still renders Business Information and Backup & Restore, unaffected by the removal", async () => {
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn());
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      expect(screen.getByText("Business Information")).toBeTruthy();
+      expect(screen.getByText("Backup & Restore")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /save settings/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /backup now/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /restore from backup/i })).toBeTruthy();
+    });
+  });
 });
