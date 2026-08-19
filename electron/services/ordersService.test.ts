@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { createConnection } from "../db/connection";
 import { runMigrations } from "../db/migrate";
@@ -11,6 +11,8 @@ import {
   createOrder,
   updateOrderStatus,
   recordPayment,
+  getOrdersSummary,
+  getTodayRangeUtc,
   InvalidOrderValueError,
   ORDER_STATUSES,
   type NewOrderInput,
@@ -476,6 +478,79 @@ describe("ordersService", () => {
       expect(updated.grandTotal).toBe(order.grandTotal);
       expect(updated.discountAmount).toBe(order.discountAmount);
       expect(updated.gstAmount).toBe(order.gstAmount);
+    });
+  });
+
+  describe("PHASE 16 — getTodayRangeUtc (duplicated from dashboardService.ts)", () => {
+    const originalTz = process.env.TZ;
+    afterEach(() => {
+      process.env.TZ = originalTz;
+    });
+
+    it("computes the correct UTC range for local midnight in a timezone ahead of UTC (IST, +5:30)", () => {
+      process.env.TZ = "Asia/Kolkata";
+      const now = new Date("2026-08-18T20:00:00.000Z");
+      const range = getTodayRangeUtc(now);
+      expect(range).toEqual({ startUtc: "2026-08-18 18:30:00", endUtc: "2026-08-19 18:30:00" });
+    });
+
+    it("computes the correct UTC range for local midnight in a timezone behind UTC (New York)", () => {
+      process.env.TZ = "America/New_York";
+      const now = new Date("2026-08-18T20:00:00.000Z");
+      const range = getTodayRangeUtc(now);
+      expect(range).toEqual({ startUtc: "2026-08-18 04:00:00", endUtc: "2026-08-19 04:00:00" });
+    });
+  });
+
+  describe("PHASE 16 — getOrdersSummary", () => {
+    it("returns zero state on a fresh database", () => {
+      expect(getOrdersSummary(db)).toEqual({ totalRevenue: 0, todaysOrders: 0 });
+    });
+
+    it("converts paise to rupees exactly once at the service boundary", () => {
+      // subtotal 10.10 -> subtotalPaise 1010; gst 18% -> round(1010*0.18)=182 paise (₹1.82); grandTotal 1192 paise = ₹11.92.
+      createOrder(db, baseInput(customerId, { items: [{ printType: "Flex", width: 1, height: 1, unit: "Meter", rate: 10.1, quantity: 1 }] }));
+      expect(getOrdersSummary(db).totalRevenue).toBe(11.92);
+    });
+
+    it("totalRevenue sums every order's grand total, regardless of creation date", () => {
+      createOrder(db, baseInput(customerId));
+      createOrder(db, baseInput(customerId));
+      const summary = getOrdersSummary(db, new Date());
+      expect(summary.totalRevenue).toBeCloseTo(3540 * 2, 5);
+    });
+
+    it("recording a payment does not change totalRevenue (booked value, not collected cash)", () => {
+      const order = createOrder(db, baseInput(customerId)); // grandTotal 3540
+      const before = getOrdersSummary(db).totalRevenue;
+      recordPayment(db, order.id, 1000);
+      const after = getOrdersSummary(db).totalRevenue;
+      expect(after).toBe(before);
+    });
+
+    it("todaysOrders counts only orders created within today's local range", () => {
+      const now = new Date();
+      createOrder(db, baseInput(customerId)); // created "now" via datetime('now')
+      const summary = getOrdersSummary(db, now);
+      expect(summary.todaysOrders).toBe(1);
+    });
+
+    it("todaysOrders excludes historical orders from before today", () => {
+      const result = db
+        .prepare(
+          `INSERT INTO orders (
+             customer_id, customer_name, customer_phone, customer_address, status,
+             subtotal_paise, discount_percent, discount_paise, gst_percent, gst_paise, grand_total_paise,
+             invoice_number, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '2020-01-01 00:00:00', '2020-01-01 00:00:00')`
+        )
+        .run(customerId, "Ramesh", "123", "Road", "Pending", 50000, 0, 0, 18, 9000, 59000);
+      const id = result.lastInsertRowid as number;
+      db.prepare("UPDATE orders SET invoice_number = ? WHERE id = ?").run(`INV-${id}`, id);
+
+      const summary = getOrdersSummary(db, new Date());
+      expect(summary.todaysOrders).toBe(0);
+      expect(summary.totalRevenue).toBeCloseTo(590, 5); // still counted in the all-time total
     });
   });
 

@@ -7,9 +7,11 @@ import {
   createOrder as createOrderService,
   updateOrderStatus as updateOrderStatusService,
   recordPayment as recordPaymentService,
+  getOrdersSummary as getOrdersSummaryService,
   InvalidOrderValueError,
   type NewOrderInput,
   type NewOrderItemInput,
+  type OrdersSummary,
 } from "../services/ordersService";
 import { OrderNotFoundError, PaymentExceedsBalanceError, type Order } from "../repositories/ordersRepository";
 import { CustomerNotFoundError } from "../repositories/customersRepository";
@@ -122,6 +124,10 @@ export function handleOrdersRecordPayment(db: DatabaseSync, payload: unknown): O
   return recordPaymentService(db, validOrderId, validAmount);
 }
 
+export function handleOrdersGetSummary(db: DatabaseSync): OrdersSummary {
+  return getOrdersSummaryService(db);
+}
+
 /**
  * Never exposes database paths, raw SQL, stack traces, or filesystem
  * paths to the renderer. Recognized validation/not-found errors pass
@@ -178,6 +184,14 @@ export function registerOrdersHandlers(db: DatabaseSync): void {
   ipcMain.handle("orders:recordPayment", (_event, payload: unknown) => {
     try {
       return handleOrdersRecordPayment(db, payload);
+    } catch (error) {
+      throw toSafeError(error);
+    }
+  });
+
+  ipcMain.handle("orders:getSummary", () => {
+    try {
+      return handleOrdersGetSummary(db);
     } catch (error) {
       throw toSafeError(error);
     }

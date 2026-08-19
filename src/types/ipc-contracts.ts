@@ -100,12 +100,18 @@ export interface OrderInput {
   gstPercent: number;
 }
 
+export interface OrdersSummary {
+  totalRevenue: number;
+  todaysOrders: number;
+}
+
 export interface OrdersApi {
   list(): Promise<Order[]>;
   get(id: number): Promise<Order>;
   create(input: OrderInput): Promise<Order>;
   updateStatus(id: number, status: OrderStatus): Promise<void>;
   recordPayment(orderId: number, amountPaidRupees: number): Promise<Order>;
+  getSummary(): Promise<OrdersSummary>;
 }
 
 export interface DashboardRecentOrder {

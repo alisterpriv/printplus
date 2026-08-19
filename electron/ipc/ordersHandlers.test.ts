@@ -12,6 +12,7 @@ import {
   handleOrdersCreate,
   handleOrdersUpdateStatus,
   handleOrdersRecordPayment,
+  handleOrdersGetSummary,
   InvalidOrderRequestError,
 } from "./ordersHandlers";
 import { InvalidOrderValueError } from "../services/ordersService";
@@ -240,6 +241,26 @@ describe("handleOrdersList / handleOrdersGet / handleOrdersCreate / handleOrders
       const created = handleOrdersCreate(db, validPayload());
       handleOrdersRecordPayment(db, { orderId: created.id, amountPaidRupees: 590 });
       expect(handleOrdersGet(db, created.id).paymentStatus).toBe("Paid");
+    });
+  });
+
+  describe("PHASE 16 — handleOrdersGetSummary", () => {
+    it("returns zero state on a fresh database", () => {
+      expect(handleOrdersGetSummary(db)).toEqual({ totalRevenue: 0, todaysOrders: 0 });
+    });
+
+    it("returns the correct shape after creating an order", () => {
+      const created = handleOrdersCreate(db, validPayload()); // grandTotal 590
+      const summary = handleOrdersGetSummary(db);
+      expect(summary).toEqual({ totalRevenue: 590, todaysOrders: 1 });
+      expect(created.id).toBeGreaterThan(0);
+    });
+
+    it("totalRevenue is unaffected by recordPayment", () => {
+      const created = handleOrdersCreate(db, validPayload());
+      const before = handleOrdersGetSummary(db).totalRevenue;
+      handleOrdersRecordPayment(db, { orderId: created.id, amountPaidRupees: 100 });
+      expect(handleOrdersGetSummary(db).totalRevenue).toBe(before);
     });
   });
 

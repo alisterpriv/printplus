@@ -13,6 +13,7 @@ import {
   countOrdersByStatus,
   countOrdersInRange,
   sumGrandTotalPaise,
+  sumAllGrandTotalPaise,
   getRecentOrders,
   getTopPrintTypes,
   OrderNotFoundError,
@@ -420,6 +421,31 @@ describe("ordersRepository", () => {
         insertOrderAt("2026-01-01 09:00:00", { grandTotalPaise: 2020 }); // 20.20
         const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-01-02 00:00:00" };
         expect(sumGrandTotalPaise(db, range)).toBe(3030); // exactly 30.30, no float drift
+      });
+    });
+
+    describe("PHASE 16 — sumAllGrandTotalPaise", () => {
+      it("returns 0 on a fresh database", () => {
+        expect(sumAllGrandTotalPaise(db)).toBe(0);
+      });
+
+      it("sums grand_total_paise across every order, regardless of created_at", () => {
+        insertOrderAt("2020-01-01 00:00:00", { grandTotalPaise: 1000 });
+        insertOrderAt("2026-06-15 00:00:00", { grandTotalPaise: 2000 });
+        expect(sumAllGrandTotalPaise(db)).toBe(3000);
+      });
+
+      it("is an exact integer sum, no rupee-float drift", () => {
+        insertOrderAt("2026-01-01 08:00:00", { grandTotalPaise: 1010 }); // 10.10
+        insertOrderAt("2026-01-01 09:00:00", { grandTotalPaise: 2020 }); // 20.20
+        expect(sumAllGrandTotalPaise(db)).toBe(3030);
+      });
+
+      it("is unaffected by recordPayment — booked revenue, not collected cash", () => {
+        const order = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+        const before = sumAllGrandTotalPaise(db);
+        recordPayment(db, order.id, 30000);
+        expect(sumAllGrandTotalPaise(db)).toBe(before);
       });
     });
 

@@ -349,6 +349,19 @@ export function sumOutstandingBalancePaise(db: DatabaseSync): number {
 }
 
 /**
+ * PHASE 16 — all-time booked revenue across every order, no WHERE clause.
+ * Distinct from sumGrandTotalPaise (date-scoped) and from
+ * sumOutstandingBalancePaise (nets out amount_paid_paise) — this is the
+ * raw grand_total_paise sum, unaffected by recordPayment.
+ */
+export function sumAllGrandTotalPaise(db: DatabaseSync): number {
+  const row = db.prepare("SELECT COALESCE(SUM(grand_total_paise), 0) as total FROM orders").get() as {
+    total: number;
+  };
+  return row.total;
+}
+
+/**
  * A lightweight summary row — deliberately NOT the full Order shape, and
  * deliberately does not load order_items, so a dashboard "recent orders"
  * list never pays the per-order item-fetch cost listOrders/getOrder do.

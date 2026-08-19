@@ -13,8 +13,11 @@ import {
   createOrder as repoCreateOrder,
   updateOrderStatus as repoUpdateOrderStatus,
   recordPayment as repoRecordPayment,
+  countOrdersInRange,
+  sumAllGrandTotalPaise,
   type Order,
   type CreateOrderItemInput,
+  type DateRange,
 } from "../repositories/ordersRepository";
 import { getCustomerById } from "../repositories/customersRepository";
 import { MAX_RATE } from "./ratesService";
@@ -225,4 +228,48 @@ export function recordPayment(db: DatabaseSync, orderId: number, amountPaidRupee
   }
 
   return repoRecordPayment(db, orderId, rupeesToPaise(amountPaidRupees));
+}
+
+function paiseToRupees(paise: number): number {
+  return paise / 100;
+}
+
+function formatAsDbTimestamp(date: Date): string {
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
+ * PHASE 16 — duplicated from dashboardService.ts's identical function
+ * rather than cross-imported, matching this codebase's existing
+ * paiseToRupees precedent: a small pure helper, independently owned by
+ * each service that needs it, rather than a cross-service dependency.
+ * See dashboardService.ts's getTodayRangeUtc for the full reasoning on
+ * why this exact local-Y/M/D reconstruction is DST-safe.
+ */
+export function getTodayRangeUtc(now: Date = new Date()): DateRange {
+  const startOfTodayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const startOfTomorrowLocal = new Date(startOfTodayLocal.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    startUtc: formatAsDbTimestamp(startOfTodayLocal),
+    endUtc: formatAsDbTimestamp(startOfTomorrowLocal),
+  };
+}
+
+export interface OrdersSummary {
+  totalRevenue: number;
+  todaysOrders: number;
+}
+
+/**
+ * PHASE 16 — both figures are all-time/all-orders, deliberately unaffected
+ * by whatever search/status/date filters are active in the renderer (which
+ * stay entirely client-side). totalRevenue is booked value (grand_total_paise),
+ * never touched by recordPayment. todaysOrders uses the same local-timezone
+ * half-open range as the Dashboard's identical-meaning field.
+ */
+export function getOrdersSummary(db: DatabaseSync, now: Date = new Date()): OrdersSummary {
+  return {
+    totalRevenue: paiseToRupees(sumAllGrandTotalPaise(db)),
+    todaysOrders: countOrdersInRange(db, getTodayRangeUtc(now)),
+  };
 }

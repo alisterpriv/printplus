@@ -10,32 +10,108 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Search, Eye, Printer } from "lucide-react";
 import { toast } from "sonner";
-import type { Order, OrderStatus, PaymentStatus } from "../../types/ipc-contracts";
+import type { Order, OrderStatus, PaymentStatus, OrdersSummary } from "../../types/ipc-contracts";
 import { getErrorMessage } from "../lib/getErrorMessage";
 
 const ORDER_STATUSES: OrderStatus[] = ["Pending", "Processing", "Completed"];
 
+type StatusFilter = "All" | OrderStatus;
+type DateFilter = "All" | "Today" | "This Week" | "This Month";
+
+const STATUS_FILTER_OPTIONS: StatusFilter[] = ["All", ...ORDER_STATUSES];
+const DATE_FILTER_OPTIONS: DateFilter[] = ["All", "Today", "This Week", "This Month"];
+
+interface LocalDateRange {
+  startUtc: string;
+  endUtc: string;
+}
+
+/** Same "YYYY-MM-DD HH:MM:SS" UTC-naive shape orders.created_at is stored in. */
+function formatAsDbTimestamp(date: Date): string {
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
+ * PHASE 16 — client-side mirror of the server's local-timezone,
+ * DST-safe, half-open date range technique (see dashboardService.ts's
+ * getTodayRangeUtc for the full reasoning). This filter stays entirely
+ * client-side so it can compose with the free-text search, which is
+ * also client-side and cannot be expressed as SQL.
+ */
+export function getTodayRangeLocal(now: Date): LocalDateRange {
+  const startOfTodayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const startOfTomorrowLocal = new Date(startOfTodayLocal.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    startUtc: formatAsDbTimestamp(startOfTodayLocal),
+    endUtc: formatAsDbTimestamp(startOfTomorrowLocal),
+  };
+}
+
+/** Monday-start local week — the first "week" concept in this codebase. */
+export function getThisWeekRangeLocal(now: Date): LocalDateRange {
+  const startOfTodayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const daysSinceMonday = (startOfTodayLocal.getDay() + 6) % 7;
+  const startOfWeekLocal = new Date(startOfTodayLocal.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
+  const startOfNextWeekLocal = new Date(startOfWeekLocal.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return {
+    startUtc: formatAsDbTimestamp(startOfWeekLocal),
+    endUtc: formatAsDbTimestamp(startOfNextWeekLocal),
+  };
+}
+
+export function getThisMonthRangeLocal(now: Date): LocalDateRange {
+  const startOfMonthLocal = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const startOfNextMonthLocal = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+  return {
+    startUtc: formatAsDbTimestamp(startOfMonthLocal),
+    endUtc: formatAsDbTimestamp(startOfNextMonthLocal),
+  };
+}
+
+function matchesDateFilter(order: Order, filter: DateFilter, now: Date): boolean {
+  if (filter === "All") return true;
+  const range =
+    filter === "Today" ? getTodayRangeLocal(now) : filter === "This Week" ? getThisWeekRangeLocal(now) : getThisMonthRangeLocal(now);
+  return order.createdAt >= range.startUtc && order.createdAt < range.endUtc;
+}
+
 export function Orders() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [summary, setSummary] = useState<OrdersSummary>({ totalRevenue: 0, todaysOrders: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
+  const [dateFilter, setDateFilter] = useState<DateFilter>("All");
 
   useEffect(() => {
-    window.api.orders
-      .list()
-      .then(setOrders)
+    Promise.all([window.api.orders.list(), window.api.orders.getSummary()])
+      .then(([ordersResult, summaryResult]) => {
+        setOrders(ordersResult);
+        setSummary(summaryResult);
+      })
       .catch((error) => toast.error(getErrorMessage(error, "Failed to load orders")))
       .finally(() => setIsLoading(false));
   }, []);
 
+  const now = new Date();
   const filteredOrders = orders.filter(order =>
-    order.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    order.customerPhone?.includes(searchQuery)
+    (order.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      order.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      order.customerPhone?.includes(searchQuery)) &&
+    (statusFilter === "All" || order.status === statusFilter) &&
+    matchesDateFilter(order, dateFilter, now)
   );
+
+  const hasActiveFilters = searchQuery !== "" || statusFilter !== "All" || dateFilter !== "All";
+  const resetFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("All");
+    setDateFilter("All");
+  };
 
   const handleStatusChange = async (order: Order, status: OrderStatus) => {
     if (status === order.status) return;
@@ -80,7 +156,7 @@ export function Orders() {
         <p className="text-gray-600 mt-2">View and manage all your orders</p>
       </div>
 
-      {/* Search */}
+      {/* Search & Filters */}
       <Card className="p-6 bg-white border border-gray-200 rounded-xl mb-6">
         <div className="flex items-center gap-4">
           <div className="flex-1 relative">
@@ -93,6 +169,38 @@ export function Orders() {
               className="pl-10"
             />
           </div>
+
+          <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+            <SelectTrigger className="w-[160px]" aria-label="Filter by status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTER_OPTIONS.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status === "All" ? "All Statuses" : status}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={dateFilter} onValueChange={(value) => setDateFilter(value as DateFilter)}>
+            <SelectTrigger className="w-[160px]" aria-label="Filter by date">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DATE_FILTER_OPTIONS.map((date) => (
+                <SelectItem key={date} value={date}>
+                  {date === "All" ? "All Dates" : date}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {hasActiveFilters && (
+            <Button variant="outline" className="border-gray-300 hover:bg-gray-50" onClick={resetFilters}>
+              Reset Filters
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -112,12 +220,12 @@ export function Orders() {
 
         <Card className="p-4 bg-white border border-gray-200 rounded-xl">
           <p className="text-sm text-gray-600 mb-1">Total Revenue</p>
-          <p className="text-2xl font-bold text-[#2563EB]">₹0</p>
+          <p className="text-2xl font-bold text-[#2563EB]">₹{summary.totalRevenue.toFixed(2)}</p>
         </Card>
 
         <Card className="p-4 bg-white border border-gray-200 rounded-xl">
           <p className="text-sm text-gray-600 mb-1">Today's Orders</p>
-          <p className="text-2xl font-bold text-purple-600">0</p>
+          <p className="text-2xl font-bold text-purple-600">{summary.todaysOrders}</p>
         </Card>
       </div>
 
