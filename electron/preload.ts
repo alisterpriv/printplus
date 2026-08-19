@@ -6,6 +6,7 @@ import type {
   OrdersApi,
   DashboardApi,
   BusinessSettingsApi,
+  BackupApi,
 } from "../src/types/ipc-contracts";
 
 /**
@@ -46,6 +47,11 @@ const businessSettingsApi: BusinessSettingsApi = {
   update: (input) => ipcRenderer.invoke("businessSettings:update", input),
 };
 
+const backupApi: BackupApi = {
+  create: () => ipcRenderer.invoke("backup:create"),
+  restore: () => ipcRenderer.invoke("backup:restore"),
+};
+
 contextBridge.exposeInMainWorld("api", {
   settings: settingsApi,
   rates: ratesApi,
@@ -53,4 +59,5 @@ contextBridge.exposeInMainWorld("api", {
   orders: ordersApi,
   dashboard: dashboardApi,
   businessSettings: businessSettingsApi,
+  backup: backupApi,
 });

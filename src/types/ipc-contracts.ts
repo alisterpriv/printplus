@@ -148,6 +148,22 @@ export interface BusinessSettingsApi {
   update(input: BusinessSettingsInput): Promise<BusinessSettings>;
 }
 
+export type BackupCreateOutcome =
+  | { status: "success"; filePath: string }
+  | { status: "cancelled" }
+  | { status: "error"; message: string };
+
+export type BackupRestoreOutcome =
+  | { status: "success" }
+  | { status: "cancelled" }
+  | { status: "invalid"; message: string }
+  | { status: "error"; message: string };
+
+export interface BackupApi {
+  create(): Promise<BackupCreateOutcome>;
+  restore(): Promise<BackupRestoreOutcome>;
+}
+
 export interface PrintPlusApi {
   settings: SettingsApi;
   rates: RatesApi;
@@ -155,6 +171,7 @@ export interface PrintPlusApi {
   orders: OrdersApi;
   dashboard: DashboardApi;
   businessSettings: BusinessSettingsApi;
+  backup: BackupApi;
 }
 
 declare global {

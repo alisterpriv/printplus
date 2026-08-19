@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { Settings } from "./Settings";
-import type { BusinessSettings, PrintPlusApi } from "../../types/ipc-contracts";
+import type { BackupApi, BusinessSettings, PrintPlusApi } from "../../types/ipc-contracts";
 
 const PERSISTED: BusinessSettings = {
   businessName: "Ramesh Printers",
@@ -25,7 +25,11 @@ const EMPTY_PERSISTED: BusinessSettings = {
   updatedAt: "2026-01-01 00:00:00",
 };
 
-function mockApi(get: PrintPlusApi["businessSettings"]["get"], update: PrintPlusApi["businessSettings"]["update"]) {
+function mockApi(
+  get: PrintPlusApi["businessSettings"]["get"],
+  update: PrintPlusApi["businessSettings"]["update"],
+  backup: Partial<BackupApi> = {}
+) {
   window.api = {
     settings: { get: vi.fn(), set: vi.fn() },
     rates: { list: vi.fn(), update: vi.fn() },
@@ -33,6 +37,11 @@ function mockApi(get: PrintPlusApi["businessSettings"]["get"], update: PrintPlus
     orders: { list: vi.fn(), get: vi.fn(), create: vi.fn(), updateStatus: vi.fn() },
     dashboard: { getSummary: vi.fn() },
     businessSettings: { get, update },
+    backup: {
+      create: vi.fn().mockResolvedValue({ status: "cancelled" }),
+      restore: vi.fn().mockResolvedValue({ status: "cancelled" }),
+      ...backup,
+    },
   } as unknown as PrintPlusApi;
 }
 
@@ -159,5 +168,159 @@ describe("Settings", () => {
     await user.click(screen.getByRole("button", { name: /save settings/i }));
 
     expect(update).not.toHaveBeenCalled();
+  });
+
+  describe("PHASE 14 — Backup & Restore", () => {
+    it("renders Backup Now and Restore from Backup controls with explanatory text", async () => {
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn());
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      expect(screen.getByRole("button", { name: /backup now/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /restore from backup/i })).toBeTruthy();
+      expect(screen.getByText(/back up your printplus data/i)).toBeTruthy();
+      expect(screen.getByText(/restoring replaces the current data/i)).toBeTruthy();
+    });
+
+    it("shows a loading state while a backup is in progress, then re-enables the button", async () => {
+      let resolveCreate: (value: { status: "success"; filePath: string }) => void;
+      const create = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveCreate = resolve;
+          })
+      );
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn(), { create: create as unknown as BackupApi["create"] });
+      const user = userEvent.setup();
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      const button = screen.getByRole("button", { name: /backup now/i });
+      await user.click(button);
+
+      expect(await screen.findByRole("button", { name: /backing up/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /backing up/i })).toHaveProperty("disabled", true);
+
+      resolveCreate!({ status: "success", filePath: "/tmp/printplus-backup-2026-01-01-000000.db" });
+      expect(await screen.findByRole("button", { name: /^backup now$/i })).toBeTruthy();
+    });
+
+    it("shows a success toast naming the file path after a successful backup", async () => {
+      const successSpy = vi.spyOn(toast, "success");
+      const create = vi.fn().mockResolvedValue({ status: "success", filePath: "/tmp/my-backup.db" });
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn(), { create });
+      const user = userEvent.setup();
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      await user.click(screen.getByRole("button", { name: /backup now/i }));
+      await vi.waitFor(() => expect(successSpy).toHaveBeenCalledWith("Backup saved to /tmp/my-backup.db"));
+    });
+
+    it("shows no toast at all when the backup save dialog is cancelled", async () => {
+      const successSpy = vi.spyOn(toast, "success");
+      const errorSpy = vi.spyOn(toast, "error");
+      const create = vi.fn().mockResolvedValue({ status: "cancelled" });
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn(), { create });
+      const user = userEvent.setup();
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      await user.click(screen.getByRole("button", { name: /backup now/i }));
+      await screen.findByRole("button", { name: /^backup now$/i }); // wait for the click to settle
+      expect(successSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("shows an error toast when the backup fails", async () => {
+      const errorSpy = vi.spyOn(toast, "error");
+      const create = vi.fn().mockResolvedValue({ status: "error", message: "Backup failed. Please try again." });
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn(), { create });
+      const user = userEvent.setup();
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      await user.click(screen.getByRole("button", { name: /backup now/i }));
+      await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledWith("Backup failed. Please try again."));
+    });
+
+    it("shows a loading state while a restore is in progress", async () => {
+      let resolveRestore: (value: { status: "cancelled" }) => void;
+      const restore = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveRestore = resolve;
+          })
+      );
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn(), { restore: restore as unknown as BackupApi["restore"] });
+      const user = userEvent.setup();
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      await user.click(screen.getByRole("button", { name: /restore from backup/i }));
+      expect(await screen.findByRole("button", { name: /restoring/i })).toBeTruthy();
+
+      resolveRestore!({ status: "cancelled" });
+      expect(await screen.findByRole("button", { name: /^restore from backup$/i })).toBeTruthy();
+    });
+
+    it("shows no toast at all when the restore file dialog or destructive confirmation is cancelled", async () => {
+      const successSpy = vi.spyOn(toast, "success");
+      const errorSpy = vi.spyOn(toast, "error");
+      const restore = vi.fn().mockResolvedValue({ status: "cancelled" });
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn(), { restore });
+      const user = userEvent.setup();
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      await user.click(screen.getByRole("button", { name: /restore from backup/i }));
+      await screen.findByRole("button", { name: /^restore from backup$/i });
+      expect(successSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("shows an error toast when the selected file is not a valid backup", async () => {
+      const errorSpy = vi.spyOn(toast, "error");
+      const restore = vi.fn().mockResolvedValue({ status: "invalid", message: "The selected file is not a valid database." });
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn(), { restore });
+      const user = userEvent.setup();
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      await user.click(screen.getByRole("button", { name: /restore from backup/i }));
+      await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledWith("The selected file is not a valid database."));
+    });
+
+    it("shows an error toast when restore fails", async () => {
+      const errorSpy = vi.spyOn(toast, "error");
+      const restore = vi.fn().mockResolvedValue({ status: "error", message: "Restore failed unexpectedly." });
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn(), { restore });
+      const user = userEvent.setup();
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      await user.click(screen.getByRole("button", { name: /restore from backup/i }));
+      await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledWith("Restore failed unexpectedly."));
+    });
+
+    it("disables both buttons while either a backup or restore is in flight", async () => {
+      let resolveCreate: (value: { status: "cancelled" }) => void;
+      const create = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveCreate = resolve;
+          })
+      );
+      mockApi(vi.fn().mockResolvedValue(PERSISTED), vi.fn(), { create: create as unknown as BackupApi["create"] });
+      const user = userEvent.setup();
+      render(<Settings />);
+      await screen.findByDisplayValue("Ramesh Printers");
+
+      await user.click(screen.getByRole("button", { name: /backup now/i }));
+      expect(screen.getByRole("button", { name: /restore from backup/i })).toHaveProperty("disabled", true);
+
+      resolveCreate!({ status: "cancelled" });
+      await screen.findByRole("button", { name: /^backup now$/i });
+    });
   });
 });

@@ -5,7 +5,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Switch } from "./ui/switch";
-import { Building2, Save } from "lucide-react";
+import { Building2, Save, DatabaseBackup, Upload } from "lucide-react";
 import { toast } from "sonner";
 import type { BusinessSettingsInput } from "../../types/ipc-contracts";
 import { getErrorMessage } from "../lib/getErrorMessage";
@@ -22,6 +22,9 @@ export function Settings() {
   const [autoBackup, setAutoBackup] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [printAutoSave, setPrintAutoSave] = useState(false);
+
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   useEffect(() => {
     window.api.businessSettings
@@ -74,6 +77,39 @@ export function Settings() {
       toast.error(getErrorMessage(error, "Failed to save business information"));
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleBackupNow = async () => {
+    setIsBackingUp(true);
+    try {
+      const result = await window.api.backup.create();
+      if (result.status === "success") {
+        toast.success(`Backup saved to ${result.filePath}`);
+      } else if (result.status === "error") {
+        toast.error(result.message);
+      }
+      // "cancelled" is not an error — the user simply closed the dialog.
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Backup failed"));
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleRestoreFromBackup = async () => {
+    setIsRestoring(true);
+    try {
+      const result = await window.api.backup.restore();
+      if (result.status === "invalid" || result.status === "error") {
+        toast.error(result.message);
+      }
+      // "cancelled" is not an error. "success" restarts the app before
+      // this can ever resolve in practice.
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Restore failed"));
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -161,6 +197,44 @@ export function Settings() {
               </div>
             </div>
           )}
+        </Card>
+
+        {/* Backup & Restore */}
+        <Card className="p-6 bg-white border border-gray-200 rounded-xl">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="bg-[#2563EB] text-white p-3 rounded-lg">
+              <DatabaseBackup className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-[#1F2937]">Backup & Restore</h2>
+              <p className="text-sm text-gray-600">
+                Back up your PrintPlus data to a file you can restore later.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button
+              onClick={handleBackupNow}
+              disabled={isBackingUp || isRestoring}
+              className="bg-[#2563EB] hover:bg-blue-700"
+            >
+              <DatabaseBackup className="w-4 h-4 mr-2" />
+              {isBackingUp ? "Backing Up..." : "Backup Now"}
+            </Button>
+            <Button
+              onClick={handleRestoreFromBackup}
+              disabled={isBackingUp || isRestoring}
+              variant="outline"
+              className="border-gray-300"
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              {isRestoring ? "Restoring..." : "Restore from Backup"}
+            </Button>
+          </div>
+          <p className="text-sm text-gray-500 mt-3">
+            Restoring replaces the current data with the selected backup.
+          </p>
         </Card>
 
         {/* Invoice Settings */}

@@ -9,6 +9,7 @@ import { registerCustomersHandlers } from "./ipc/customersHandlers";
 import { registerOrdersHandlers } from "./ipc/ordersHandlers";
 import { registerDashboardHandlers } from "./ipc/dashboardHandlers";
 import { registerBusinessSettingsHandlers } from "./ipc/businessSettingsHandlers";
+import { registerBackupHandlers } from "./ipc/backupHandlers";
 
 let db: DatabaseSync | undefined;
 
@@ -37,6 +38,7 @@ app.whenReady().then(() => {
     registerOrdersHandlers(db);
     registerDashboardHandlers(db);
     registerBusinessSettingsHandlers(db);
+    registerBackupHandlers(db, dbPath);
   } catch (error) {
     console.error("[startup] failed to initialize the database:", error);
     dialog.showErrorBox(
