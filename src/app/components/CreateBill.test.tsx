@@ -55,10 +55,10 @@ const CREATED_ORDER: Order = {
   updatedAt: "2026-01-01 00:00:00",
 };
 
-function mockApi(overrides: Partial<PrintPlusApi["orders"]> = {}, customers: Customer[] = [CUSTOMER]) {
+function mockApi(overrides: Partial<PrintPlusApi["orders"]> = {}, customers: Customer[] = [CUSTOMER], rates: Rate[] = [RATE]) {
   const api = {
     settings: { get: vi.fn(), set: vi.fn() },
-    rates: { list: vi.fn().mockResolvedValue([RATE]), update: vi.fn() },
+    rates: { list: vi.fn().mockResolvedValue(rates), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     customers: {
       list: vi.fn().mockResolvedValue(customers),
       create: vi.fn(),
@@ -348,6 +348,32 @@ describe("CreateBill", () => {
       expect(api.orders.create).toHaveBeenCalledWith(
         expect.objectContaining({ customerId: 9 })
       );
+    });
+  });
+
+  describe("PHASE 19 — rate/print-type management regression", () => {
+    it("a newly added print type (not previously known to Create Bill) appears as a selectable option", async () => {
+      const NEW_TYPE: Rate = { id: 2, printType: "Foam Board", rate: 250, createdAt: "2026-01-01 00:00:00", updatedAt: "2026-01-01 00:00:00" };
+      mockApi({}, [CUSTOMER], [RATE, NEW_TYPE]);
+      const user = userEvent.setup();
+      renderCreateBill();
+
+      const [, printTypeTrigger] = await getEnabledComboboxes();
+      await user.click(printTypeTrigger);
+
+      expect(await screen.findByText("Foam Board")).toBeTruthy();
+    });
+
+    it("a deleted print type (no longer returned by rates.list) is not offered as an option", async () => {
+      mockApi({}, [CUSTOMER], [RATE]); // only "Flex" — simulates "Banner" having been deleted
+      const user = userEvent.setup();
+      renderCreateBill();
+
+      const [, printTypeTrigger] = await getEnabledComboboxes();
+      await user.click(printTypeTrigger);
+
+      expect(await screen.findByText("Flex")).toBeTruthy();
+      expect(screen.queryByText("Banner")).toBeNull();
     });
   });
 });

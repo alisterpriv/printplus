@@ -20,7 +20,9 @@ export interface Rate {
 
 export interface RatesApi {
   list(): Promise<Rate[]>;
+  create(printType: string, rate: number): Promise<Rate>;
   update(id: number, rate: number): Promise<void>;
+  delete(id: number): Promise<void>;
 }
 
 export interface Customer {

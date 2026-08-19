@@ -1,6 +1,12 @@
 import { ipcMain } from "electron";
 import type { DatabaseSync } from "node:sqlite";
-import { listRates as listRatesService, updateRateValue, InvalidRateValueError } from "../services/ratesService";
+import {
+  listRates as listRatesService,
+  updateRateValue,
+  createRateValue,
+  deleteRateValue,
+  InvalidRateValueError,
+} from "../services/ratesService";
 import { RateNotFoundError, type Rate } from "../repositories/ratesRepository";
 
 /** Thrown for a structurally malformed request (wrong type/shape). */
@@ -20,6 +26,13 @@ export function validateRateNumber(rate: unknown): number {
   return rate;
 }
 
+export function validatePrintTypeName(printType: unknown): string {
+  if (typeof printType !== "string" || printType.trim().length === 0) {
+    throw new InvalidRateRequestError("Invalid print type name");
+  }
+  return printType;
+}
+
 /** Pure logic, independently testable without a live ipcMain/Electron window. */
 export function handleRatesList(db: DatabaseSync): Rate[] {
   return listRatesService(db);
@@ -33,6 +46,21 @@ export function handleRatesUpdate(db: DatabaseSync, payload: unknown): void {
   const validId = validateRateId(id);
   const validRate = validateRateNumber(rate);
   updateRateValue(db, validId, validRate);
+}
+
+export function handleRatesCreate(db: DatabaseSync, payload: unknown): Rate {
+  if (typeof payload !== "object" || payload === null) {
+    throw new InvalidRateRequestError("Invalid payload");
+  }
+  const { printType, rate } = payload as { printType?: unknown; rate?: unknown };
+  const validPrintType = validatePrintTypeName(printType);
+  const validRate = validateRateNumber(rate);
+  return createRateValue(db, validPrintType, validRate);
+}
+
+export function handleRatesDelete(db: DatabaseSync, payload: unknown): void {
+  const validId = validateRateId(payload);
+  deleteRateValue(db, validId);
 }
 
 /**
@@ -65,6 +93,22 @@ export function registerRatesHandlers(db: DatabaseSync): void {
   ipcMain.handle("rates:update", (_event, payload: unknown) => {
     try {
       handleRatesUpdate(db, payload);
+    } catch (error) {
+      throw toSafeError(error);
+    }
+  });
+
+  ipcMain.handle("rates:create", (_event, payload: unknown) => {
+    try {
+      return handleRatesCreate(db, payload);
+    } catch (error) {
+      throw toSafeError(error);
+    }
+  });
+
+  ipcMain.handle("rates:delete", (_event, payload: unknown) => {
+    try {
+      handleRatesDelete(db, payload);
     } catch (error) {
       throw toSafeError(error);
     }

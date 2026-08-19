@@ -22,7 +22,9 @@ const settingsApi: SettingsApi = {
 
 const ratesApi: RatesApi = {
   list: () => ipcRenderer.invoke("rates:list"),
+  create: (printType, rate) => ipcRenderer.invoke("rates:create", { printType, rate }),
   update: (id, rate) => ipcRenderer.invoke("rates:update", { id, rate }),
+  delete: (id) => ipcRenderer.invoke("rates:delete", id),
 };
 
 const customersApi: CustomersApi = {

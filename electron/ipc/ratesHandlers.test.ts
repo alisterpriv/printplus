@@ -5,8 +5,11 @@ import { runMigrations } from "../db/migrate";
 import {
   validateRateId,
   validateRateNumber,
+  validatePrintTypeName,
   handleRatesList,
   handleRatesUpdate,
+  handleRatesCreate,
+  handleRatesDelete,
   InvalidRateRequestError,
 } from "./ratesHandlers";
 import { InvalidRateValueError } from "../services/ratesService";
@@ -50,6 +53,23 @@ describe("validateRateNumber", () => {
   });
 });
 
+describe("validatePrintTypeName", () => {
+  it("accepts a non-empty string", () => {
+    expect(validatePrintTypeName("Foam Board")).toBe("Foam Board");
+  });
+
+  it("rejects a non-string", () => {
+    expect(() => validatePrintTypeName(123)).toThrow(InvalidRateRequestError);
+    expect(() => validatePrintTypeName(null)).toThrow(InvalidRateRequestError);
+    expect(() => validatePrintTypeName(undefined)).toThrow(InvalidRateRequestError);
+  });
+
+  it("rejects an empty or whitespace-only string", () => {
+    expect(() => validatePrintTypeName("")).toThrow(InvalidRateRequestError);
+    expect(() => validatePrintTypeName("   ")).toThrow(InvalidRateRequestError);
+  });
+});
+
 describe("handleRatesList / handleRatesUpdate", () => {
   let db: DatabaseSync;
 
@@ -83,5 +103,46 @@ describe("handleRatesList / handleRatesUpdate", () => {
 
   it("propagates RateNotFoundError for a nonexistent id", () => {
     expect(() => handleRatesUpdate(db, { id: 999999, rate: 10 })).toThrow(RateNotFoundError);
+  });
+
+  describe("PHASE 19 — handleRatesCreate", () => {
+    it("creates a rate through the full handler logic", () => {
+      const created = handleRatesCreate(db, { printType: "Foam Board", rate: 25 });
+      expect(created.printType).toBe("Foam Board");
+      expect(handleRatesList(db)).toHaveLength(9);
+    });
+
+    it("rejects a malformed payload before touching the database", () => {
+      expect(() => handleRatesCreate(db, "not an object")).toThrow(InvalidRateRequestError);
+      expect(() => handleRatesCreate(db, null)).toThrow(InvalidRateRequestError);
+      expect(() => handleRatesCreate(db, { printType: "Foam Board" })).toThrow(InvalidRateRequestError);
+      expect(() => handleRatesCreate(db, { rate: 25 })).toThrow(InvalidRateRequestError);
+    });
+
+    it("propagates a business-rule rejection from the service (invalid price)", () => {
+      expect(() => handleRatesCreate(db, { printType: "Foam Board", rate: 0 })).toThrow(InvalidRateValueError);
+    });
+
+    it("propagates a friendly duplicate-name rejection from the service", () => {
+      expect(() => handleRatesCreate(db, { printType: "Flex", rate: 999 })).toThrow(InvalidRateValueError);
+    });
+  });
+
+  describe("PHASE 19 — handleRatesDelete", () => {
+    it("deletes a rate through the full handler logic", () => {
+      const target = handleRatesList(db)[0];
+      handleRatesDelete(db, target.id);
+      expect(handleRatesList(db)).toHaveLength(7);
+    });
+
+    it("rejects an invalid id before touching the database", () => {
+      expect(() => handleRatesDelete(db, "1")).toThrow(InvalidRateRequestError);
+      expect(() => handleRatesDelete(db, 0)).toThrow(InvalidRateRequestError);
+      expect(() => handleRatesDelete(db, null)).toThrow(InvalidRateRequestError);
+    });
+
+    it("propagates RateNotFoundError for a nonexistent id", () => {
+      expect(() => handleRatesDelete(db, 999999)).toThrow(RateNotFoundError);
+    });
   });
 });
