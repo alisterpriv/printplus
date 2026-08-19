@@ -19,6 +19,13 @@ describe("createConnection", () => {
     db.close();
   });
 
+  it("PHASE 20 — sets a busy_timeout so a locked write retries instead of failing immediately", () => {
+    const db = createConnection(":memory:");
+    const result = db.prepare("PRAGMA busy_timeout").get() as { timeout: number };
+    expect(result.timeout).toBe(5000);
+    db.close();
+  });
+
   it("actually enables WAL mode on a real file-backed database", () => {
     const tmpPath = path.join(os.tmpdir(), `printplus-test-${Date.now()}-${Math.random()}.db`);
     const db = createConnection(tmpPath);
