@@ -14,6 +14,8 @@ import {
   countOrdersInRange,
   sumGrandTotalPaise,
   sumAllGrandTotalPaise,
+  countDistinctCustomersInRange,
+  averageGrandTotalPaise,
   getRecentOrders,
   getTopPrintTypes,
   OrderNotFoundError,
@@ -333,7 +335,10 @@ describe("ordersRepository", () => {
      * added) by following the same insert-then-update-by-id pattern
      * ordersRepository.createOrder itself uses.
      */
-    function insertOrderAt(createdAt: string, overrides: Partial<{ status: string; grandTotalPaise: number }> = {}) {
+    function insertOrderAt(
+      createdAt: string,
+      overrides: Partial<{ status: string; grandTotalPaise: number; customerId: number }> = {}
+    ) {
       const result = db
         .prepare(
           `INSERT INTO orders (
@@ -343,7 +348,7 @@ describe("ordersRepository", () => {
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`
         )
         .run(
-          customerId,
+          overrides.customerId ?? customerId,
           "Ramesh Kumar",
           "9876543210",
           "12 MG Road",
@@ -446,6 +451,62 @@ describe("ordersRepository", () => {
         const before = sumAllGrandTotalPaise(db);
         recordPayment(db, order.id, 30000);
         expect(sumAllGrandTotalPaise(db)).toBe(before);
+      });
+    });
+
+    describe("PHASE 17 — countDistinctCustomersInRange", () => {
+      it("returns 0 on a fresh database for any range", () => {
+        const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-02-01 00:00:00" };
+        expect(countDistinctCustomersInRange(db, range)).toBe(0);
+      });
+
+      it("counts a customer with multiple in-range orders only once", () => {
+        insertOrderAt("2026-01-05 00:00:00", { customerId });
+        insertOrderAt("2026-01-10 00:00:00", { customerId });
+        insertOrderAt("2026-01-15 00:00:00", { customerId });
+        const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-02-01 00:00:00" };
+        expect(countDistinctCustomersInRange(db, range)).toBe(1);
+      });
+
+      it("counts distinct customers across multiple orders", () => {
+        const secondCustomerId = createCustomer(db, { name: "Second Customer", phone: null, email: null, address: null }).id;
+        insertOrderAt("2026-01-05 00:00:00", { customerId });
+        insertOrderAt("2026-01-10 00:00:00", { customerId: secondCustomerId });
+        const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-02-01 00:00:00" };
+        expect(countDistinctCustomersInRange(db, range)).toBe(2);
+      });
+
+      it("is a half-open range: includes the start instant, excludes the end instant", () => {
+        insertOrderAt("2026-01-01 00:00:00", { customerId }); // exactly at start -> included
+        const secondCustomerId = createCustomer(db, { name: "Second Customer", phone: null, email: null, address: null }).id;
+        insertOrderAt("2026-02-01 00:00:00", { customerId: secondCustomerId }); // exactly at end -> excluded
+        const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-02-01 00:00:00" };
+        expect(countDistinctCustomersInRange(db, range)).toBe(1);
+      });
+
+      it("excludes orders outside the range", () => {
+        insertOrderAt("2025-12-31 23:59:59", { customerId });
+        const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-02-01 00:00:00" };
+        expect(countDistinctCustomersInRange(db, range)).toBe(0);
+      });
+    });
+
+    describe("PHASE 17 — averageGrandTotalPaise", () => {
+      it("returns 0 on a fresh database", () => {
+        expect(averageGrandTotalPaise(db)).toBe(0);
+      });
+
+      it("returns the exact average across all orders, all-time", () => {
+        insertOrderAt("2020-01-01 00:00:00", { grandTotalPaise: 1000 });
+        insertOrderAt("2026-06-15 00:00:00", { grandTotalPaise: 3000 });
+        expect(averageGrandTotalPaise(db)).toBe(2000);
+      });
+
+      it("is unaffected by recordPayment — booked value, not collected cash", () => {
+        const order = createOrder(db, baseOrderInput(customerId)); // grandTotalPaise 59000
+        const before = averageGrandTotalPaise(db);
+        recordPayment(db, order.id, 30000);
+        expect(averageGrandTotalPaise(db)).toBe(before);
       });
     });
 

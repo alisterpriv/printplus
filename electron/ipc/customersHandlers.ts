@@ -4,7 +4,9 @@ import {
   listCustomers as listCustomersService,
   createCustomer as createCustomerService,
   updateCustomerValue,
+  getCustomersSummary as getCustomersSummaryService,
   InvalidCustomerValueError,
+  type CustomersSummary,
 } from "../services/customersService";
 import { CustomerNotFoundError, type Customer, type CustomerInput } from "../repositories/customersRepository";
 
@@ -67,6 +69,10 @@ export function handleCustomersUpdate(db: DatabaseSync, payload: unknown): void 
   updateCustomerValue(db, validId, input);
 }
 
+export function handleCustomersGetSummary(db: DatabaseSync): CustomersSummary {
+  return getCustomersSummaryService(db);
+}
+
 /**
  * Never exposes database paths, raw SQL, stack traces, or filesystem
  * paths to the renderer. Recognized validation/not-found errors pass
@@ -105,6 +111,14 @@ export function registerCustomersHandlers(db: DatabaseSync): void {
   ipcMain.handle("customers:update", (_event, payload: unknown) => {
     try {
       handleCustomersUpdate(db, payload);
+    } catch (error) {
+      throw toSafeError(error);
+    }
+  });
+
+  ipcMain.handle("customers:getSummary", () => {
+    try {
+      return handleCustomersGetSummary(db);
     } catch (error) {
       throw toSafeError(error);
     }

@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useState, useEffect, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -114,7 +114,8 @@ function validatePercentField(value: string): string | undefined {
 
 export function CreateBill() {
   const navigate = useNavigate();
-  
+  const [searchParams] = useSearchParams();
+
   // Customer selection (Phase 6) — Create Bill now links to a real, saved
   // customer instead of free-typing name/phone/address each time. The
   // phone/address fields become a read-only display of the selected
@@ -175,6 +176,27 @@ export function CreateBill() {
   useEffect(() => {
     loadCustomers();
   }, []);
+
+  // PHASE 17 — pre-selects a customer when arriving via Customers'
+  // "New Bill" link (/create-bill?customerId=<id>). Applied at most once
+  // (guarded by the ref), the first time customers finishes loading — not
+  // on every reload of `customers` — so it can never clobber a selection
+  // the operator has since changed by hand (e.g. after adding a new
+  // customer mid-session re-triggers loadCustomers). An absent, invalid,
+  // or unknown id leaves the existing default (empty) selection untouched.
+  const appliedInitialCustomerId = useRef(false);
+  useEffect(() => {
+    if (appliedInitialCustomerId.current || customersLoading) return;
+    appliedInitialCustomerId.current = true;
+
+    const customerIdParam = searchParams.get("customerId");
+    if (!customerIdParam) return;
+
+    const matched = customers.find((c) => String(c.id) === customerIdParam);
+    if (matched) {
+      setSelectedCustomerId(String(matched.id));
+    }
+  }, [customersLoading, customers, searchParams]);
 
   const handleAddCustomer = async () => {
     if (!newCustomer.name.trim()) {

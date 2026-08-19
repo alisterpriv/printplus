@@ -8,6 +8,7 @@ import {
   updateCustomer,
   getCustomerById,
   countCustomers,
+  countCustomersInRange,
   CustomerNotFoundError,
 } from "./customersRepository";
 
@@ -111,6 +112,44 @@ describe("customersRepository", () => {
       createCustomer(db, { name: "Second", phone: null, email: null, address: null });
       createCustomer(db, { name: "Third", phone: null, email: null, address: null });
       expect(countCustomers(db)).toBe(3);
+    });
+  });
+
+  describe("PHASE 17 — countCustomersInRange", () => {
+    /** Bypasses createCustomer (always datetime('now')) so tests can control created_at precisely. */
+    function insertCustomerAt(createdAt: string, name = "Ramesh Kumar") {
+      db.prepare(
+        `INSERT INTO customers (name, phone, email, address, created_at, updated_at)
+         VALUES (?, NULL, NULL, NULL, ?, ?)`
+      ).run(name, createdAt, createdAt);
+    }
+
+    it("returns 0 on a fresh database for any range", () => {
+      const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-02-01 00:00:00" };
+      expect(countCustomersInRange(db, range)).toBe(0);
+    });
+
+    it("counts only customers whose created_at falls in the range", () => {
+      insertCustomerAt("2026-01-15 00:00:00", "In Range");
+      insertCustomerAt("2025-12-31 23:59:59", "Before Range");
+      insertCustomerAt("2026-02-01 00:00:00", "After Range");
+      const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-02-01 00:00:00" };
+      expect(countCustomersInRange(db, range)).toBe(1);
+    });
+
+    it("is a half-open range: includes the start instant, excludes the end instant", () => {
+      insertCustomerAt("2026-01-01 00:00:00", "At Start"); // included
+      insertCustomerAt("2026-02-01 00:00:00", "At End"); // excluded
+      const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-02-01 00:00:00" };
+      expect(countCustomersInRange(db, range)).toBe(1);
+    });
+
+    it("counts multiple matching customers", () => {
+      insertCustomerAt("2026-01-05 00:00:00", "A");
+      insertCustomerAt("2026-01-10 00:00:00", "B");
+      insertCustomerAt("2026-01-20 00:00:00", "C");
+      const range = { startUtc: "2026-01-01 00:00:00", endUtc: "2026-02-01 00:00:00" };
+      expect(countCustomersInRange(db, range)).toBe(3);
     });
   });
 });

@@ -40,10 +40,17 @@ export interface CustomerInput {
   address?: string | null;
 }
 
+export interface CustomersSummary {
+  activeThisMonth: number;
+  newThisMonth: number;
+  avgOrderValue: number;
+}
+
 export interface CustomersApi {
   list(): Promise<Customer[]>;
   create(input: CustomerInput): Promise<Customer>;
   update(id: number, input: CustomerInput): Promise<void>;
+  getSummary(): Promise<CustomersSummary>;
 }
 
 export type OrderStatus = "Pending" | "Processing" | "Completed";

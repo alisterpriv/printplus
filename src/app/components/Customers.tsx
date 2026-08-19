@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -12,13 +13,16 @@ import {
 } from "./ui/dialog";
 import { Search, UserPlus, Mail, Phone, Pencil } from "lucide-react";
 import { toast } from "sonner";
-import type { Customer } from "../../types/ipc-contracts";
+import type { Customer, CustomersSummary } from "../../types/ipc-contracts";
 import { getErrorMessage } from "../lib/getErrorMessage";
 
 const EMPTY_FORM = { name: "", phone: "", email: "", address: "" };
+const EMPTY_SUMMARY: CustomersSummary = { activeThisMonth: 0, newThisMonth: 0, avgOrderValue: 0 };
 
 export function Customers() {
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [summary, setSummary] = useState<CustomersSummary>(EMPTY_SUMMARY);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -28,16 +32,18 @@ export function Customers() {
   const [isSaving, setIsSaving] = useState(false);
 
   const loadCustomers = () => {
+    return window.api.customers.list().then(setCustomers);
+  };
+
+  const loadAll = () => {
     setIsLoading(true);
-    return window.api.customers
-      .list()
-      .then(setCustomers)
+    return Promise.all([loadCustomers(), window.api.customers.getSummary().then(setSummary)])
       .catch((error) => toast.error(getErrorMessage(error, "Failed to load customers")))
       .finally(() => setIsLoading(false));
   };
 
   useEffect(() => {
-    loadCustomers();
+    loadAll();
   }, []);
 
   const filteredCustomers = customers.filter(customer =>
@@ -130,17 +136,17 @@ export function Customers() {
 
         <Card className="p-4 bg-white border border-gray-200 rounded-xl">
           <p className="text-sm text-gray-600 mb-1">Active This Month</p>
-          <p className="text-2xl font-bold text-green-600">0</p>
+          <p className="text-2xl font-bold text-green-600">{summary.activeThisMonth}</p>
         </Card>
 
         <Card className="p-4 bg-white border border-gray-200 rounded-xl">
           <p className="text-sm text-gray-600 mb-1">New This Month</p>
-          <p className="text-2xl font-bold text-blue-600">0</p>
+          <p className="text-2xl font-bold text-blue-600">{summary.newThisMonth}</p>
         </Card>
 
         <Card className="p-4 bg-white border border-gray-200 rounded-xl">
           <p className="text-sm text-gray-600 mb-1">Avg. Order Value</p>
-          <p className="text-2xl font-bold text-purple-600">₹0</p>
+          <p className="text-2xl font-bold text-purple-600">₹{summary.avgOrderValue.toFixed(2)}</p>
         </Card>
 
       </div>
@@ -223,6 +229,7 @@ export function Customers() {
                   variant="outline"
                   size="sm"
                   className="flex-1 border-gray-300"
+                  onClick={() => navigate(`/create-bill?customerId=${customer.id}`)}
                 >
                   New Bill
                 </Button>

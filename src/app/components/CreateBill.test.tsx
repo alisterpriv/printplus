@@ -23,6 +23,16 @@ const CUSTOMER: Customer = {
   updatedAt: "2026-01-01 00:00:00",
 };
 
+const SECOND_CUSTOMER: Customer = {
+  id: 9,
+  name: "Sunita",
+  phone: "9111111111",
+  email: null,
+  address: "Park Road",
+  createdAt: "2026-01-01 00:00:00",
+  updatedAt: "2026-01-01 00:00:00",
+};
+
 const CREATED_ORDER: Order = {
   id: 42,
   invoiceNumber: "INV-000042",
@@ -45,12 +55,12 @@ const CREATED_ORDER: Order = {
   updatedAt: "2026-01-01 00:00:00",
 };
 
-function mockApi(overrides: Partial<PrintPlusApi["orders"]> = {}) {
+function mockApi(overrides: Partial<PrintPlusApi["orders"]> = {}, customers: Customer[] = [CUSTOMER]) {
   const api = {
     settings: { get: vi.fn(), set: vi.fn() },
     rates: { list: vi.fn().mockResolvedValue([RATE]), update: vi.fn() },
     customers: {
-      list: vi.fn().mockResolvedValue([CUSTOMER]),
+      list: vi.fn().mockResolvedValue(customers),
       create: vi.fn(),
       update: vi.fn(),
     },
@@ -66,9 +76,9 @@ function mockApi(overrides: Partial<PrintPlusApi["orders"]> = {}) {
   return api;
 }
 
-function renderCreateBill() {
+function renderCreateBill(initialPath = "/create-bill") {
   render(
-    <MemoryRouter initialEntries={["/create-bill"]}>
+    <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route path="/create-bill" element={<CreateBill />} />
         <Route path="/invoice/:id" element={<div data-testid="invoice-route" />} />
@@ -265,6 +275,79 @@ describe("CreateBill", () => {
 
       expect(await screen.findByText("Must be between 0 and 100.")).toBeTruthy();
       expect(api.orders.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("PHASE 17 — customerId query-param pre-selection", () => {
+    it("pre-selects the matching customer once customers have loaded", async () => {
+      mockApi({}, [CUSTOMER, SECOND_CUSTOMER]);
+      renderCreateBill("/create-bill?customerId=9");
+
+      const [customerTrigger] = await getEnabledComboboxes();
+      expect(customerTrigger.textContent).toContain("Sunita");
+    });
+
+    it("waits for customers to finish loading before applying the pre-selection", async () => {
+      mockApi({}, [CUSTOMER, SECOND_CUSTOMER]);
+      renderCreateBill("/create-bill?customerId=9");
+
+      // Before customers resolve, the trigger is disabled and shows the loading placeholder.
+      expect(screen.getByText(/loading customers/i)).toBeTruthy();
+      const [customerTrigger] = await getEnabledComboboxes();
+      expect(customerTrigger.textContent).toContain("Sunita");
+    });
+
+    it("an absent customerId leaves the default (empty) selection unchanged", async () => {
+      mockApi({}, [CUSTOMER, SECOND_CUSTOMER]);
+      renderCreateBill("/create-bill");
+
+      const [customerTrigger] = await getEnabledComboboxes();
+      expect(customerTrigger.textContent).toContain("Select a customer");
+    });
+
+    it("an invalid (non-numeric) customerId leaves the default selection unchanged, without crashing", async () => {
+      mockApi({}, [CUSTOMER, SECOND_CUSTOMER]);
+      renderCreateBill("/create-bill?customerId=not-a-number");
+
+      const [customerTrigger] = await getEnabledComboboxes();
+      expect(customerTrigger.textContent).toContain("Select a customer");
+    });
+
+    it("an unknown customerId (no matching customer) leaves the default selection unchanged, without crashing", async () => {
+      mockApi({}, [CUSTOMER, SECOND_CUSTOMER]);
+      renderCreateBill("/create-bill?customerId=999999");
+
+      const [customerTrigger] = await getEnabledComboboxes();
+      expect(customerTrigger.textContent).toContain("Select a customer");
+    });
+
+    it("does not change any other Create Bill default (discount/GST stay at their normal defaults)", async () => {
+      mockApi({}, [CUSTOMER, SECOND_CUSTOMER]);
+      renderCreateBill("/create-bill?customerId=9");
+      await getEnabledComboboxes();
+
+      expect((screen.getByLabelText(/discount/i) as HTMLInputElement).value).toBe("0");
+      expect((screen.getByLabelText(/gst/i) as HTMLInputElement).value).toBe("18");
+    });
+
+    it("a pre-selected customer from the query param can still be used to submit an order normally", async () => {
+      const api = mockApi({}, [CUSTOMER, SECOND_CUSTOMER]);
+      const user = userEvent.setup();
+      renderCreateBill("/create-bill?customerId=9");
+
+      await getEnabledComboboxes();
+      const [, printTypeTrigger] = await getEnabledComboboxes();
+      await user.click(printTypeTrigger);
+      await user.click(await screen.findByText("Flex"));
+      await user.type(screen.getByLabelText(/width/i), "2");
+      await user.type(screen.getByLabelText(/height/i), "3");
+      await user.click(screen.getByRole("button", { name: /add item/i }));
+      await user.click(screen.getByRole("button", { name: /print invoice/i }));
+
+      await waitFor(() => expect(api.orders.create).toHaveBeenCalledTimes(1));
+      expect(api.orders.create).toHaveBeenCalledWith(
+        expect.objectContaining({ customerId: 9 })
+      );
     });
   });
 });

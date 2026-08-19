@@ -8,6 +8,7 @@ import {
   handleCustomersList,
   handleCustomersCreate,
   handleCustomersUpdate,
+  handleCustomersGetSummary,
   InvalidCustomerRequestError,
 } from "./customersHandlers";
 import { InvalidCustomerValueError } from "../services/customersService";
@@ -105,5 +106,27 @@ describe("handleCustomersList / handleCustomersCreate / handleCustomersUpdate", 
     expect(() =>
       handleCustomersUpdate(db, { id: 999999, name: "Nobody", phone: null, email: null, address: null })
     ).toThrow(CustomerNotFoundError);
+  });
+
+  describe("PHASE 17 — handleCustomersGetSummary", () => {
+    it("returns zero state on a fresh database", () => {
+      expect(handleCustomersGetSummary(db)).toEqual({ activeThisMonth: 0, newThisMonth: 0, avgOrderValue: 0 });
+    });
+
+    it("returns the correct response shape", () => {
+      handleCustomersCreate(db, { name: "Ramesh", phone: null, email: null, address: null });
+      const summary = handleCustomersGetSummary(db);
+      expect(summary).toHaveProperty("activeThisMonth");
+      expect(summary).toHaveProperty("newThisMonth");
+      expect(summary).toHaveProperty("avgOrderValue");
+      expect(typeof summary.activeThisMonth).toBe("number");
+      expect(typeof summary.newThisMonth).toBe("number");
+      expect(typeof summary.avgOrderValue).toBe("number");
+    });
+
+    it("newThisMonth reflects a customer just created through the handler", () => {
+      handleCustomersCreate(db, { name: "Ramesh", phone: null, email: null, address: null });
+      expect(handleCustomersGetSummary(db).newThisMonth).toBe(1);
+    });
   });
 });

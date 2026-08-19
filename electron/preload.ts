@@ -29,6 +29,7 @@ const customersApi: CustomersApi = {
   list: () => ipcRenderer.invoke("customers:list"),
   create: (input) => ipcRenderer.invoke("customers:create", input),
   update: (id, input) => ipcRenderer.invoke("customers:update", { id, ...input }),
+  getSummary: () => ipcRenderer.invoke("customers:getSummary"),
 };
 
 const ordersApi: OrdersApi = {

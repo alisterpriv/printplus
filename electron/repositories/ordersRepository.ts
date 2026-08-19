@@ -362,6 +362,30 @@ export function sumAllGrandTotalPaise(db: DatabaseSync): number {
 }
 
 /**
+ * PHASE 17 — count of distinct customers with at least one order in the
+ * given range ("active" customers for that period), not a count of orders.
+ * A customer with several orders in-range is still counted once.
+ */
+export function countDistinctCustomersInRange(db: DatabaseSync, range: DateRange): number {
+  const row = db
+    .prepare("SELECT COUNT(DISTINCT customer_id) as count FROM orders WHERE created_at >= ? AND created_at < ?")
+    .get(range.startUtc, range.endUtc) as { count: number };
+  return row.count;
+}
+
+/**
+ * PHASE 17 — all-time average order value (booked, not collected), no
+ * WHERE clause. COALESCE guards the zero-orders case, where SQLite's
+ * AVG() over no rows returns NULL rather than 0.
+ */
+export function averageGrandTotalPaise(db: DatabaseSync): number {
+  const row = db.prepare("SELECT COALESCE(AVG(grand_total_paise), 0) as average FROM orders").get() as {
+    average: number;
+  };
+  return row.average;
+}
+
+/**
  * A lightweight summary row — deliberately NOT the full Order shape, and
  * deliberately does not load order_items, so a dashboard "recent orders"
  * list never pays the per-order item-fetch cost listOrders/getOrder do.

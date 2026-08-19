@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { DateRange } from "./ordersRepository";
 
 export interface Customer {
   id: number;
@@ -74,6 +75,14 @@ export function createCustomer(db: DatabaseSync, input: CustomerInput): Customer
 /** PHASE 9 — an exact SQL count, not customers.length after a full listCustomers() fetch. */
 export function countCustomers(db: DatabaseSync): number {
   const row = db.prepare("SELECT COUNT(*) as count FROM customers").get() as { count: number };
+  return row.count;
+}
+
+/** PHASE 17 — count of customers whose own created_at falls in the given half-open range. */
+export function countCustomersInRange(db: DatabaseSync, range: DateRange): number {
+  const row = db
+    .prepare("SELECT COUNT(*) as count FROM customers WHERE created_at >= ? AND created_at < ?")
+    .get(range.startUtc, range.endUtc) as { count: number };
   return row.count;
 }
 
